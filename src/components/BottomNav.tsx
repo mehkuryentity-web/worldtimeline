@@ -3,12 +3,12 @@ import { Home, Search, Plus, User } from "lucide-react";
 
 export function BottomNav() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const items = [
+  const items: { to: "/" | "/search" | "/submit" | "/profile"; label: string; icon: typeof Home; primary?: boolean }[] = [
     { to: "/", label: "Home", icon: Home },
     { to: "/search", label: "Search", icon: Search },
     { to: "/submit", label: "Add", icon: Plus, primary: true },
     { to: "/profile", label: "Profile", icon: User },
-  ] as const;
+  ];
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-surface-1/95 backdrop-blur supports-[backdrop-filter]:bg-surface-1/80">
