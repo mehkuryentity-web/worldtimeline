@@ -99,12 +99,12 @@ export const fetchLiveNews = createServerFn({ method: "GET" })
       .maybeSingle();
 
     if (cached?.payload) {
-      return { items: cached.payload as ApiNewsItem[], cached: true };
+      return { items: cached.payload as unknown as ApiNewsItem[], cached: true };
     }
 
     try {
       const items = await fetchFromCurrents(data.category, apiKey);
-      await supabaseAdmin.from("news_cache").insert({ category: data.category, payload: items });
+      await supabaseAdmin.from("news_cache").insert({ category: data.category, payload: items as unknown as never });
       return { items, cached: false };
     } catch (e) {
       // Fall back to most recent cache, even if stale
@@ -115,7 +115,7 @@ export const fetchLiveNews = createServerFn({ method: "GET" })
         .order("fetched_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (stale?.payload) return { items: stale.payload as ApiNewsItem[], cached: true };
+      if (stale?.payload) return { items: stale.payload as unknown as ApiNewsItem[], cached: true };
       return { items: [], cached: false, error: e instanceof Error ? e.message : "Fetch failed" };
     }
   });
