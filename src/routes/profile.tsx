@@ -1,8 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { Zap, Trophy, Wallet, Activity, Calendar, Trash2 } from "lucide-react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { Zap, Trophy, Wallet, Activity, Calendar, Trash2, LogOut, LogIn } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
 import { useAppState } from "@/hooks/use-app-state";
+import { useUser } from "@/hooks/use-user";
 import { getCycle, pointsToUSD, POINTS } from "@/lib/rewards";
 import { timeAgo, timeLeft } from "@/lib/format";
 
@@ -18,6 +19,7 @@ export const Route = createFileRoute("/profile")({
 
 function ProfilePage() {
   const { state, update } = useAppState();
+  const { user, profile, signOut } = useUser();
   const cycle = typeof window !== "undefined" ? getCycle() : { start: new Date().toISOString(), end: new Date().toISOString() };
 
   const totalActions = state.history.length;
@@ -36,24 +38,49 @@ function ProfilePage() {
     }));
   };
 
+  const initials = (profile?.display_name ?? user?.email ?? "YOU")
+    .split(/[\s@]/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((s) => s[0]?.toUpperCase())
+    .join("");
+
   return (
     <div className="min-h-screen bg-background pb-28">
       <TopBar />
       <main className="mx-auto max-w-md space-y-4 px-4 pt-4">
         {/* Identity */}
         <section className="flex items-center gap-3 rounded-xl border border-border bg-surface-1 p-4">
-          <div className="grid h-12 w-12 place-items-center rounded-full bg-surface-2 font-mono text-sm text-primary">
-            YOU
-          </div>
-          <div className="flex-1">
-            <div className="text-sm font-semibold">Anonymous Reader</div>
+          {profile?.avatar_url ? (
+            <img src={profile.avatar_url} alt="" className="h-12 w-12 rounded-full object-cover" />
+          ) : (
+            <div className="grid h-12 w-12 place-items-center rounded-full bg-surface-2 font-mono text-sm text-primary">
+              {initials || "YOU"}
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <div className="truncate text-sm font-semibold">
+              {profile?.display_name ?? (user ? user.email : "Anonymous Reader")}
+            </div>
             <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-              Sign in to sync · enable Cloud
+              {user ? (profile?.username ? `@${profile.username}` : "Signed in") : "Sign in to sync across devices"}
             </div>
           </div>
-          <span className="rounded-full border border-primary/40 bg-primary/10 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-primary">
-            Tier 1
-          </span>
+          {user ? (
+            <button
+              onClick={() => signOut()}
+              className="flex items-center gap-1 rounded-full border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-destructive"
+            >
+              <LogOut className="h-3 w-3" /> Out
+            </button>
+          ) : (
+            <Link
+              to="/auth"
+              className="flex items-center gap-1 rounded-full border border-primary/50 bg-primary/10 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-primary"
+            >
+              <LogIn className="h-3 w-3" /> Sign in
+            </Link>
+          )}
         </section>
 
         {/* Reward wallet */}
