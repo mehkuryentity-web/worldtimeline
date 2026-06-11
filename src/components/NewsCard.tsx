@@ -180,6 +180,15 @@ export function NewsCard({ item }: Props) {
           >
             <Share2 className="h-3.5 w-3.5" />
           </button>
+          <button
+            onClick={toggleSave}
+            aria-label={isSaved ? "Remove bookmark" : "Save for later"}
+            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition ${
+              isSaved ? "text-primary" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Bookmark className={`h-3.5 w-3.5 ${isSaved ? "fill-current" : ""}`} />
+          </button>
         </div>
         <a
           href={item.url}
