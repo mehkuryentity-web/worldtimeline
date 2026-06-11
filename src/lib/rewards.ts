@@ -30,6 +30,19 @@ export interface ArticleState {
   comments: { id: string; at: string; text: string }[];
 }
 
+export interface SavedItem {
+  id: string;
+  title: string;
+  summary: string;
+  url: string;
+  source: string;
+  region: string;
+  category: string;
+  publishedAt: string;
+  image?: string;
+  savedAt: string;
+}
+
 export interface AppState {
   points: number;
   totalEarned: number;
@@ -37,6 +50,8 @@ export interface AppState {
   articles: Record<string, ArticleState>;
   submissions: { id: string; title: string; detail: string; at: string }[];
   history: { id: string; action: Action; at: string; points: number }[];
+  saved: Record<string, SavedItem>;
+  country?: string;
 }
 
 const empty: AppState = {
@@ -46,6 +61,7 @@ const empty: AppState = {
   articles: {},
   submissions: [],
   history: [],
+  saved: {},
 };
 
 export function load(): AppState {

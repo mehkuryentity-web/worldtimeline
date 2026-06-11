@@ -15,6 +15,7 @@ import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiNewsRouteImport } from './routes/api/news'
+import { Route as ApiGeoRouteImport } from './routes/api/geo'
 
 const SubmitRoute = SubmitRouteImport.update({
   id: '/submit',
@@ -46,6 +47,11 @@ const ApiNewsRoute = ApiNewsRouteImport.update({
   path: '/api/news',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiGeoRoute = ApiGeoRouteImport.update({
+  id: '/api/geo',
+  path: '/api/geo',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -53,6 +59,7 @@ export interface FileRoutesByFullPath {
   '/profile': typeof ProfileRoute
   '/search': typeof SearchRoute
   '/submit': typeof SubmitRoute
+  '/api/geo': typeof ApiGeoRoute
   '/api/news': typeof ApiNewsRoute
 }
 export interface FileRoutesByTo {
@@ -61,6 +68,7 @@ export interface FileRoutesByTo {
   '/profile': typeof ProfileRoute
   '/search': typeof SearchRoute
   '/submit': typeof SubmitRoute
+  '/api/geo': typeof ApiGeoRoute
   '/api/news': typeof ApiNewsRoute
 }
 export interface FileRoutesById {
@@ -70,13 +78,28 @@ export interface FileRoutesById {
   '/profile': typeof ProfileRoute
   '/search': typeof SearchRoute
   '/submit': typeof SubmitRoute
+  '/api/geo': typeof ApiGeoRoute
   '/api/news': typeof ApiNewsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/profile' | '/search' | '/submit' | '/api/news'
+  fullPaths:
+    | '/'
+    | '/auth'
+    | '/profile'
+    | '/search'
+    | '/submit'
+    | '/api/geo'
+    | '/api/news'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/profile' | '/search' | '/submit' | '/api/news'
+  to:
+    | '/'
+    | '/auth'
+    | '/profile'
+    | '/search'
+    | '/submit'
+    | '/api/geo'
+    | '/api/news'
   id:
     | '__root__'
     | '/'
@@ -84,6 +107,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/search'
     | '/submit'
+    | '/api/geo'
     | '/api/news'
   fileRoutesById: FileRoutesById
 }
@@ -93,6 +117,7 @@ export interface RootRouteChildren {
   ProfileRoute: typeof ProfileRoute
   SearchRoute: typeof SearchRoute
   SubmitRoute: typeof SubmitRoute
+  ApiGeoRoute: typeof ApiGeoRoute
   ApiNewsRoute: typeof ApiNewsRoute
 }
 
@@ -140,6 +165,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiNewsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/geo': {
+      id: '/api/geo'
+      path: '/api/geo'
+      fullPath: '/api/geo'
+      preLoaderRoute: typeof ApiGeoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -149,6 +181,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProfileRoute: ProfileRoute,
   SearchRoute: SearchRoute,
   SubmitRoute: SubmitRoute,
+  ApiGeoRoute: ApiGeoRoute,
   ApiNewsRoute: ApiNewsRoute,
 }
 export const routeTree = rootRouteImport
