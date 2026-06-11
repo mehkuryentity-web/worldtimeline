@@ -155,6 +155,7 @@ export const Route = createFileRoute("/api/news")({
         }
 
         const cacheKey = `news:${country}:${category}`;
+        const cache = getCache();
         const hit = cache.get<NewsResponse>(cacheKey);
         if (hit) {
           return json({ ...hit, cached: true } satisfies NewsResponse);
