@@ -22,9 +22,33 @@ interface Props {
 export function NewsCard({ item }: Props) {
   const { state, award, update } = useAppState();
   const a = state.articles[item.id] ?? { reaction: null, comments: [] };
+  const isSaved = Boolean(state.saved?.[item.id]);
   const [openComments, setOpenComments] = useState(false);
   const [openTimeline, setOpenTimeline] = useState(false);
   const [commentText, setCommentText] = useState("");
+
+  const toggleSave = () => {
+    update((s) => {
+      const next = { ...(s.saved ?? {}) };
+      if (next[item.id]) {
+        delete next[item.id];
+      } else {
+        next[item.id] = {
+          id: item.id,
+          title: item.title,
+          summary: item.summary,
+          url: item.url,
+          source: item.source,
+          region: item.region,
+          category: item.category,
+          publishedAt: item.publishedAt,
+          image: item.image,
+          savedAt: new Date().toISOString(),
+        };
+      }
+      return { ...s, saved: next };
+    });
+  };
 
   const react = (r: "like" | "dislike") => {
     const wasSame = a.reaction === r;
