@@ -64,12 +64,28 @@ async function fetchNewsProxy(category: Category, country: string): Promise<News
 
 function Home() {
   const [category, setCategory] = useState<Category>("Top");
-  const [country, setCountry] = useState<string>("GLOBAL");
-  const { award } = useAppState();
+  const { state, award, update } = useAppState();
+  const [country, setCountryState] = useState<string>(() => state.country ?? "GLOBAL");
   const countryMeta = findCountry(country);
+
+  const setCountry = (code: string) => {
+    setCountryState(code);
+    update((s) => ({ ...s, country: code }));
+  };
 
   useEffect(() => {
     award("open_app");
+    // Auto-detect country once if user hasn't set one.
+    if (!state.country) {
+      fetch("/api/geo")
+        .then((r) => r.json())
+        .then((d: { country: string | null }) => {
+          if (d.country && findCountry(d.country).code === d.country) {
+            setCountry(d.country);
+          }
+        })
+        .catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -77,7 +93,7 @@ function Home() {
     queryKey: ["news", country, category],
     queryFn: () => fetchNewsProxy(category, country),
     refetchInterval: 5 * 60 * 1000,
-    staleTime: 60_000,
+    staleTime: 5 * 60 * 1000,
   });
 
   const items: NewsItem[] = (data?.items ?? []).map((n) => ({
