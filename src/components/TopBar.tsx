@@ -23,6 +23,13 @@ export function TopBar() {
           </div>
         </Link>
         <div className="flex items-center gap-2">
+          <Link
+            to="/saved"
+            aria-label="Saved articles"
+            className="grid h-8 w-8 place-items-center rounded-full border border-border bg-surface-1 text-muted-foreground hover:text-primary"
+          >
+            <Bookmark className="h-3.5 w-3.5" />
+          </Link>
           <div className="flex items-center gap-2 rounded-full border border-border bg-surface-1 px-3 py-1">
             <Zap className="h-3.5 w-3.5 text-accent" />
             <span className="font-mono text-xs tabular-nums">{state.points}</span>
