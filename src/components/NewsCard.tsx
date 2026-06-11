@@ -7,6 +7,7 @@ import {
   Clock,
   ExternalLink,
   Radio,
+  Bookmark,
 } from "lucide-react";
 import type { NewsItem } from "@/lib/mock-news";
 import { TIMELINES } from "@/lib/mock-news";
