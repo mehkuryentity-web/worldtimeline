@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Globe2, Zap, User } from "lucide-react";
+import { Globe2, Zap, User, Bookmark } from "lucide-react";
 import { useAppState } from "@/hooks/use-app-state";
 import { useUser } from "@/hooks/use-user";
 
