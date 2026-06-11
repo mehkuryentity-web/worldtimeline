@@ -7,6 +7,7 @@ import {
   Clock,
   ExternalLink,
   Radio,
+  Bookmark,
 } from "lucide-react";
 import type { NewsItem } from "@/lib/mock-news";
 import { TIMELINES } from "@/lib/mock-news";
@@ -21,9 +22,33 @@ interface Props {
 export function NewsCard({ item }: Props) {
   const { state, award, update } = useAppState();
   const a = state.articles[item.id] ?? { reaction: null, comments: [] };
+  const isSaved = Boolean(state.saved?.[item.id]);
   const [openComments, setOpenComments] = useState(false);
   const [openTimeline, setOpenTimeline] = useState(false);
   const [commentText, setCommentText] = useState("");
+
+  const toggleSave = () => {
+    update((s) => {
+      const next = { ...(s.saved ?? {}) };
+      if (next[item.id]) {
+        delete next[item.id];
+      } else {
+        next[item.id] = {
+          id: item.id,
+          title: item.title,
+          summary: item.summary,
+          url: item.url,
+          source: item.source,
+          region: item.region,
+          category: item.category,
+          publishedAt: item.publishedAt,
+          image: item.image,
+          savedAt: new Date().toISOString(),
+        };
+      }
+      return { ...s, saved: next };
+    });
+  };
 
   const react = (r: "like" | "dislike") => {
     const wasSame = a.reaction === r;
@@ -154,6 +179,15 @@ export function NewsCard({ item }: Props) {
             className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground"
           >
             <Share2 className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={toggleSave}
+            aria-label={isSaved ? "Remove bookmark" : "Save for later"}
+            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition ${
+              isSaved ? "text-primary" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Bookmark className={`h-3.5 w-3.5 ${isSaved ? "fill-current" : ""}`} />
           </button>
         </div>
         <a

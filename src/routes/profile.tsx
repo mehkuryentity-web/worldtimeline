@@ -35,6 +35,7 @@ function ProfilePage() {
       articles: {},
       submissions: [],
       history: [],
+      saved: {},
     }));
   };
 

@@ -14,7 +14,13 @@ import NodeCache from "node-cache";
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CACHE_TTL_SECONDS = 5 * 60; // 5 minutes
-const cache = new NodeCache({ stdTTL: CACHE_TTL_SECONDS, checkperiod: 60 });
+// checkperiod:0 — Cloudflare Workers disallow setInterval at module scope.
+// Lazy-init so the cache is created on first request, not at module load.
+let _cache: NodeCache | null = null;
+function getCache(): NodeCache {
+  if (!_cache) _cache = new NodeCache({ stdTTL: CACHE_TTL_SECONDS, checkperiod: 0 });
+  return _cache;
+}
 
 interface NewsItem {
   id: string;
@@ -149,6 +155,7 @@ export const Route = createFileRoute("/api/news")({
         }
 
         const cacheKey = `news:${country}:${category}`;
+        const cache = getCache();
         const hit = cache.get<NewsResponse>(cacheKey);
         if (hit) {
           return json({ ...hit, cached: true } satisfies NewsResponse);
