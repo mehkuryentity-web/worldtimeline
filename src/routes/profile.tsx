@@ -36,6 +36,7 @@ function ProfilePage() {
       submissions: [],
       history: [],
       saved: {},
+      userPosts: [],
     }));
   };
 
