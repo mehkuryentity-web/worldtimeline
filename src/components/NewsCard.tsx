@@ -120,7 +120,31 @@ export function NewsCard({ item }: Props) {
         </span>
       </div>
 
-      <div className="px-4 py-3">
+      {item.image && (
+        <Link
+          to="/article/$id"
+          params={{ id: item.id }}
+          onClick={() => award("read_article")}
+          className="block aspect-[16/9] w-full overflow-hidden bg-surface-2"
+        >
+          <img
+            src={item.image}
+            alt={item.title}
+            loading="lazy"
+            className="h-full w-full object-cover transition hover:scale-[1.02]"
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).style.display = "none";
+            }}
+          />
+        </Link>
+      )}
+
+      <Link
+        to="/article/$id"
+        params={{ id: item.id }}
+        onClick={() => award("read_article")}
+        className="block px-4 py-3 transition hover:bg-background/30"
+      >
         <h3 className="text-[16px] font-semibold leading-snug tracking-tight">{item.title}</h3>
         <p className="mt-1.5 line-clamp-3 text-sm leading-relaxed text-muted-foreground">
           {item.summary}
@@ -130,6 +154,10 @@ export function NewsCard({ item }: Props) {
           <span>·</span>
           <span>{item.region}</span>
         </div>
+      </Link>
+
+      <div className="px-4 pb-3">
+
 
         {timeline && (
           <button
