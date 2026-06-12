@@ -151,6 +151,7 @@ export const Route = createFileRoute("/api/news")({
         const url = new URL(request.url);
         const category = (url.searchParams.get("category") || "Top").trim();
         const country = (url.searchParams.get("country") || "GLOBAL").trim().toUpperCase();
+        const q = (url.searchParams.get("q") || "").trim();
 
         if (!Object.prototype.hasOwnProperty.call(CATEGORY_MAP, category)) {
           return json({ error: `Unknown category: ${category}` }, 400);
@@ -164,7 +165,10 @@ export const Route = createFileRoute("/api/news")({
           );
         }
 
-        const cacheKey = `news:${country}:${category}`;
+        // Cache key includes the keyword bucket so searches are cached
+        // independently. Repeated identical searches within 5 min are served
+        // from memory; new keywords fall through and refresh.
+        const cacheKey = `news:${country}:${category}:${q.toLowerCase()}`;
         const cache = getCache();
         const hit = cache.get<NewsResponse>(cacheKey);
         if (hit) {
@@ -172,7 +176,7 @@ export const Route = createFileRoute("/api/news")({
         }
 
         try {
-          const items = await fetchFromUpstream(category, country, apiKey);
+          const items = await fetchFromUpstream(category, country, apiKey, q || undefined);
           const payload: NewsResponse = {
             items,
             cached: false,
