@@ -43,6 +43,16 @@ export interface SavedItem {
   savedAt: string;
 }
 
+export interface UserPost {
+  id: string;
+  title: string;
+  summary: string;
+  category: string;
+  region: string;
+  publishedAt: string;
+  media?: { type: "image" | "video"; dataUrl: string }[];
+}
+
 export interface AppState {
   points: number;
   totalEarned: number;
@@ -51,6 +61,7 @@ export interface AppState {
   submissions: { id: string; title: string; detail: string; at: string }[];
   history: { id: string; action: Action; at: string; points: number }[];
   saved: Record<string, SavedItem>;
+  userPosts: UserPost[];
   country?: string;
 }
 
@@ -62,6 +73,7 @@ const empty: AppState = {
   submissions: [],
   history: [],
   saved: {},
+  userPosts: [],
 };
 
 export function load(): AppState {
