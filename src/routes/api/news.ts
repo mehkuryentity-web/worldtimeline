@@ -68,13 +68,20 @@ async function fetchFromUpstream(
   category: string,
   country: string,
   apiKey: string,
+  q?: string,
 ): Promise<NewsItem[]> {
   const mapped = CATEGORY_MAP[category] ?? null;
-  const url = new URL("https://api.currentsapi.services/v1/latest-news");
+  // Use the /search endpoint when the user supplied keywords, otherwise the
+  // standard latest-news endpoint. Both share the same response shape.
+  const url = new URL(
+    q
+      ? "https://api.currentsapi.services/v1/search"
+      : "https://api.currentsapi.services/v1/latest-news",
+  );
   url.searchParams.set("language", "en");
+  if (q) url.searchParams.set("keywords", q);
   if (mapped) url.searchParams.set("category", mapped);
   if (country && country !== "GLOBAL") {
-    // CurrentsAPI expects lowercase ISO country code (e.g. "ng")
     url.searchParams.set("country", country.toLowerCase());
   }
   url.searchParams.set("apiKey", apiKey);
@@ -113,7 +120,9 @@ async function fetchFromUpstream(
       summary: n.description ?? "",
       url: n.url,
       image: n.image && n.image !== "None" ? n.image : undefined,
-    }));
+    }))
+    // Newest first — feed refreshes show recency.
+    .sort((a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt));
 }
 
 const CORS_HEADERS = {
