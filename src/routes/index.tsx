@@ -107,7 +107,7 @@ function Home() {
   });
 
   // Always render newest first so refreshes surface recency.
-  const items: NewsItem[] = (data?.items ?? [])
+  const apiItems: NewsItem[] = (data?.items ?? [])
     .map((n) => ({
       id: n.id,
       category: (CATEGORIES.includes(n.category as Category) ? n.category : "Top") as Category,
@@ -118,14 +118,32 @@ function Home() {
       summary: n.summary,
       url: n.url,
       image: n.image,
-    }))
-    .sort((a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt));
+    }));
+
+  // Merge user-submitted posts (filtered to active category) into the feed.
+  const userItems: NewsItem[] = (state.userPosts ?? [])
+    .filter((p) => category === "Top" || p.category === category)
+    .map((p) => ({
+      id: p.id,
+      category: (CATEGORIES.includes(p.category as Category) ? p.category : "Top") as Category,
+      title: p.title,
+      source: "Community",
+      region: p.region || "Community",
+      publishedAt: p.publishedAt,
+      summary: p.summary,
+      url: "#",
+      image: p.media?.find((m) => m.type === "image")?.dataUrl,
+    }));
+
+  const items: NewsItem[] = [...userItems, ...apiItems].sort(
+    (a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt),
+  );
 
   // Persist items so the article detail page can render them after navigation.
   useEffect(() => {
     if (items.length) cacheArticles(items);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.fetchedAt]);
+  }, [data?.fetchedAt, state.userPosts.length]);
 
   return (
     <div className="min-h-screen bg-background pb-28">
