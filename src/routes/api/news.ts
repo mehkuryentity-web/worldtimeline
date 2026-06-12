@@ -53,6 +53,7 @@ const CATEGORY_MAP: Record<string, string | null> = {
   Sports: "sports",
   Climate: "environment",
   Health: "health",
+  Entertainment: "entertainment",
 };
 
 function hostOf(url: string): string {
@@ -67,13 +68,20 @@ async function fetchFromUpstream(
   category: string,
   country: string,
   apiKey: string,
+  q?: string,
 ): Promise<NewsItem[]> {
   const mapped = CATEGORY_MAP[category] ?? null;
-  const url = new URL("https://api.currentsapi.services/v1/latest-news");
+  // Use the /search endpoint when the user supplied keywords, otherwise the
+  // standard latest-news endpoint. Both share the same response shape.
+  const url = new URL(
+    q
+      ? "https://api.currentsapi.services/v1/search"
+      : "https://api.currentsapi.services/v1/latest-news",
+  );
   url.searchParams.set("language", "en");
+  if (q) url.searchParams.set("keywords", q);
   if (mapped) url.searchParams.set("category", mapped);
   if (country && country !== "GLOBAL") {
-    // CurrentsAPI expects lowercase ISO country code (e.g. "ng")
     url.searchParams.set("country", country.toLowerCase());
   }
   url.searchParams.set("apiKey", apiKey);
@@ -112,7 +120,9 @@ async function fetchFromUpstream(
       summary: n.description ?? "",
       url: n.url,
       image: n.image && n.image !== "None" ? n.image : undefined,
-    }));
+    }))
+    // Newest first — feed refreshes show recency.
+    .sort((a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt));
 }
 
 const CORS_HEADERS = {
@@ -141,6 +151,7 @@ export const Route = createFileRoute("/api/news")({
         const url = new URL(request.url);
         const category = (url.searchParams.get("category") || "Top").trim();
         const country = (url.searchParams.get("country") || "GLOBAL").trim().toUpperCase();
+        const q = (url.searchParams.get("q") || "").trim();
 
         if (!Object.prototype.hasOwnProperty.call(CATEGORY_MAP, category)) {
           return json({ error: `Unknown category: ${category}` }, 400);
@@ -154,7 +165,10 @@ export const Route = createFileRoute("/api/news")({
           );
         }
 
-        const cacheKey = `news:${country}:${category}`;
+        // Cache key includes the keyword bucket so searches are cached
+        // independently. Repeated identical searches within 5 min are served
+        // from memory; new keywords fall through and refresh.
+        const cacheKey = `news:${country}:${category}:${q.toLowerCase()}`;
         const cache = getCache();
         const hit = cache.get<NewsResponse>(cacheKey);
         if (hit) {
@@ -162,7 +176,7 @@ export const Route = createFileRoute("/api/news")({
         }
 
         try {
-          const items = await fetchFromUpstream(category, country, apiKey);
+          const items = await fetchFromUpstream(category, country, apiKey, q || undefined);
           const payload: NewsResponse = {
             items,
             cached: false,

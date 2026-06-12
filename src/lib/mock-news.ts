@@ -7,7 +7,8 @@ export type Category =
   | "Science"
   | "Sports"
   | "Climate"
-  | "Health";
+  | "Health"
+  | "Entertainment";
 
 export const CATEGORIES: Category[] = [
   "Top",
@@ -19,7 +20,35 @@ export const CATEGORIES: Category[] = [
   "Sports",
   "Climate",
   "Health",
+  "Entertainment",
 ];
+
+// ──────────────────────────────────────────────
+// Article cache — used so /article/$id detail pages can find the article
+// even after the feed unmounts. Persists to localStorage.
+const ARTICLE_KEY = "wt:articles:v1";
+export function cacheArticles(items: NewsItem[]) {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = localStorage.getItem(ARTICLE_KEY);
+    const map: Record<string, NewsItem> = raw ? JSON.parse(raw) : {};
+    for (const it of items) map[it.id] = it;
+    localStorage.setItem(ARTICLE_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
+export function getCachedArticle(id: string): NewsItem | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(ARTICLE_KEY);
+    if (!raw) return null;
+    const map = JSON.parse(raw) as Record<string, NewsItem>;
+    return map[id] ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export interface NewsItem {
   id: string;

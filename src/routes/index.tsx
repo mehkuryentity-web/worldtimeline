@@ -8,10 +8,11 @@ import { CategoryTabs } from "@/components/CategoryTabs";
 import { CountrySelector } from "@/components/CountrySelector";
 import { NewsCard } from "@/components/NewsCard";
 import { Ticker } from "@/components/Ticker";
-import { CATEGORIES, type Category, type NewsItem } from "@/lib/mock-news";
+import { CATEGORIES, type Category, type NewsItem, cacheArticles } from "@/lib/mock-news";
 import { findCountry } from "@/lib/countries";
 import { useAppState } from "@/hooks/use-app-state";
-import { Loader2 } from "lucide-react";
+import { Loader2, Timer } from "lucide-react";
+
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -62,10 +63,20 @@ async function fetchNewsProxy(category: Category, country: string): Promise<News
   return (await res.json()) as NewsResponse;
 }
 
+// Refresh interval options for the time selector.
+const REFRESH_OPTIONS = [
+  { label: "5 min", ms: 5 * 60 * 1000 },
+  { label: "10 min", ms: 10 * 60 * 1000 },
+  { label: "30 min", ms: 30 * 60 * 1000 },
+  { label: "1 hour", ms: 60 * 60 * 1000 },
+  { label: "Off", ms: 0 },
+];
+
 function Home() {
   const [category, setCategory] = useState<Category>("Top");
   const { state, award, update } = useAppState();
   const [country, setCountryState] = useState<string>(() => state.country ?? "GLOBAL");
+  const [refreshMs, setRefreshMs] = useState<number>(5 * 60 * 1000);
   const countryMeta = findCountry(country);
 
   const setCountry = (code: string) => {
@@ -75,7 +86,6 @@ function Home() {
 
   useEffect(() => {
     award("open_app");
-    // Auto-detect country once if user hasn't set one.
     if (!state.country) {
       fetch("/api/geo")
         .then((r) => r.json())
@@ -89,24 +99,33 @@ function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ["news", country, category],
     queryFn: () => fetchNewsProxy(category, country),
-    refetchInterval: 5 * 60 * 1000,
+    refetchInterval: refreshMs > 0 ? refreshMs : false,
     staleTime: 5 * 60 * 1000,
   });
 
-  const items: NewsItem[] = (data?.items ?? []).map((n) => ({
-    id: n.id,
-    category: (CATEGORIES.includes(n.category as Category) ? n.category : "Top") as Category,
-    title: n.title,
-    source: n.source,
-    region: n.region,
-    publishedAt: n.publishedAt,
-    summary: n.summary,
-    url: n.url,
-    image: n.image,
-  }));
+  // Always render newest first so refreshes surface recency.
+  const items: NewsItem[] = (data?.items ?? [])
+    .map((n) => ({
+      id: n.id,
+      category: (CATEGORIES.includes(n.category as Category) ? n.category : "Top") as Category,
+      title: n.title,
+      source: n.source,
+      region: n.region,
+      publishedAt: n.publishedAt,
+      summary: n.summary,
+      url: n.url,
+      image: n.image,
+    }))
+    .sort((a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt));
+
+  // Persist items so the article detail page can render them after navigation.
+  useEffect(() => {
+    if (items.length) cacheArticles(items);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.fetchedAt]);
 
   return (
     <div className="min-h-screen bg-background pb-28">
@@ -126,13 +145,36 @@ function Home() {
 
         <CategoryTabs value={category} onChange={setCategory} />
 
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
             {country === "GLOBAL"
-              ? "Global feed · live"
+              ? "Global feed · newest first"
               : `${countryMeta.flag} ${countryMeta.name} · ${category}`}
           </h2>
+          <div className="flex items-center gap-1.5">
+            <Timer className="h-3 w-3 text-muted-foreground" />
+            <select
+              aria-label="Auto-refresh interval"
+              value={refreshMs}
+              onChange={(e) => setRefreshMs(Number(e.target.value))}
+              className="rounded-md border border-border bg-surface-1 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-foreground focus:border-primary focus:outline-none"
+            >
+              {REFRESH_OPTIONS.map((o) => (
+                <option key={o.label} value={o.ms}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="rounded-md border border-border bg-surface-1 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-foreground transition hover:border-primary disabled:opacity-50"
+            >
+              {isFetching ? "…" : "Refresh"}
+            </button>
+          </div>
         </div>
+
 
         {isLoading && items.length === 0 && (
           <div className="flex items-center justify-center gap-2 rounded-xl border border-border bg-surface-1 py-10 text-xs text-muted-foreground">
