@@ -8,10 +8,11 @@ import { CategoryTabs } from "@/components/CategoryTabs";
 import { CountrySelector } from "@/components/CountrySelector";
 import { NewsCard } from "@/components/NewsCard";
 import { Ticker } from "@/components/Ticker";
-import { CATEGORIES, type Category, type NewsItem } from "@/lib/mock-news";
+import { CATEGORIES, type Category, type NewsItem, cacheArticles } from "@/lib/mock-news";
 import { findCountry } from "@/lib/countries";
 import { useAppState } from "@/hooks/use-app-state";
-import { Loader2 } from "lucide-react";
+import { Loader2, Timer } from "lucide-react";
+
 
 export const Route = createFileRoute("/")({
   head: () => ({
