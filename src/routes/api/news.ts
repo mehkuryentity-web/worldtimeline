@@ -53,6 +53,7 @@ const CATEGORY_MAP: Record<string, string | null> = {
   Sports: "sports",
   Climate: "environment",
   Health: "health",
+  Entertainment: "entertainment",
 };
 
 function hostOf(url: string): string {
