@@ -1,11 +1,11 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Home, Search, Plus, User } from "lucide-react";
+import { Home, Flame, Plus, User } from "lucide-react";
 
 export function BottomNav() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const items: { to: "/" | "/search" | "/submit" | "/profile"; label: string; icon: typeof Home; primary?: boolean }[] = [
+  const items: { to: "/" | "/trending" | "/submit" | "/profile"; label: string; icon: typeof Home; primary?: boolean }[] = [
     { to: "/", label: "Home", icon: Home },
-    { to: "/search", label: "Search", icon: Search },
+    { to: "/trending", label: "Trending", icon: Flame },
     { to: "/submit", label: "Add", icon: Plus, primary: true },
     { to: "/profile", label: "Profile", icon: User },
   ];
