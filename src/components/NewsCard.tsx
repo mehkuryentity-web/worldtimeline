@@ -5,6 +5,7 @@ import type { NewsItem } from "@/lib/mock-news";
 import { TIMELINES } from "@/lib/mock-news";
 import { useAppState } from "@/hooks/use-app-state";
 import { timeAgo } from "@/lib/format";
+import { microLabel, microLabelClass } from "@/lib/micro-label";
 import { TimelineSheet } from "./TimelineSheet";
 import { ReactionBar } from "./ReactionBar";
 
