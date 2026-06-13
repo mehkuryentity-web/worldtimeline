@@ -1,12 +1,15 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Clock, ExternalLink } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
+import { ArrowLeft, Clock, ExternalLink, Loader2 } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
 import { ReactionBar } from "@/components/ReactionBar";
 import { getCachedArticle, type NewsItem } from "@/lib/mock-news";
 import { timeAgo } from "@/lib/format";
 import { useAppState } from "@/hooks/use-app-state";
+import { microLabel, microLabelClass } from "@/lib/micro-label";
+import { generateArticleSummary } from "@/lib/article-summary.functions";
 
 export const Route = createFileRoute("/article/$id")({
   head: () => ({
@@ -24,53 +27,80 @@ export const Route = createFileRoute("/article/$id")({
   ),
 });
 
-// Build an elaborated summary (>=10 lines) from whatever the source gave us.
-// We split available text into paragraphs and append structured context so the
-// user has a substantive read before deciding to visit the source.
-function buildExtendedParagraphs(item: NewsItem): string[] {
-  const base = (item.summary || "").trim();
-  const sentences = base
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+const SUMMARY_CACHE_KEY = "wt:ai-summary:v1";
 
-  const lead = sentences.slice(0, 2).join(" ") || item.title;
-  const middle = sentences.slice(2, 5).join(" ");
-  const tail = sentences.slice(5).join(" ");
+function loadCachedSummary(id: string): string[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(SUMMARY_CACHE_KEY);
+    if (!raw) return null;
+    const map = JSON.parse(raw) as Record<string, string[]>;
+    return map[id] ?? null;
+  } catch {
+    return null;
+  }
+}
 
-  const paragraphs: string[] = [];
-  paragraphs.push(lead);
-  if (middle) paragraphs.push(middle);
-  if (tail) paragraphs.push(tail);
-
-  paragraphs.push(
-    `Context: this story is filed under ${item.category} and is being reported from ${item.region} by ${item.source}. It was published ${timeAgo(item.publishedAt)}, so details may continue to develop as more outlets confirm or contest the facts.`,
-  );
-  paragraphs.push(
-    `Why it matters: ${item.category} stories in ${item.region} often have downstream effects on policy, markets, and public sentiment. Readers should weigh the framing chosen by ${item.source} against alternative coverage of the same event.`,
-  );
-  paragraphs.push(
-    `What to watch next: follow-up statements from named officials or organizations, corrections to early claims, on-the-ground reporting that adds first-hand accounts, and any timeline updates linking this story to broader ongoing events.`,
-  );
-  paragraphs.push(
-    `How to read this safely: WorldTimeline aggregates third-party reporting. Treat the summary above as a starting point — open the original source for the full reporting, photographs, on-record quotes, and any updates or corrections issued after publication.`,
-  );
-
-  return paragraphs;
+function saveCachedSummary(id: string, lines: string[]) {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = localStorage.getItem(SUMMARY_CACHE_KEY);
+    const map = raw ? (JSON.parse(raw) as Record<string, string[]>) : {};
+    map[id] = lines;
+    localStorage.setItem(SUMMARY_CACHE_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
 }
 
 function ArticlePage() {
   const { id } = Route.useParams();
   const { award } = useAppState();
   const [item, setItem] = useState<NewsItem | null>(() => getCachedArticle(id));
+  const [lines, setLines] = useState<string[]>(() => loadCachedSummary(id) ?? []);
+  const [loadingSummary, setLoadingSummary] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const callSummary = useServerFn(generateArticleSummary);
 
   useEffect(() => {
     setItem(getCachedArticle(id));
+    setLines(loadCachedSummary(id) ?? []);
     award("read_summary");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const paragraphs = useMemo(() => (item ? buildExtendedParagraphs(item) : []), [item]);
+  useEffect(() => {
+    if (!item) return;
+    if (lines.length > 0) return;
+    let cancelled = false;
+    setLoadingSummary(true);
+    setSummaryError(null);
+    callSummary({
+      data: {
+        id: item.id,
+        title: item.title,
+        summary: item.summary,
+        source: item.source,
+        url: item.url,
+      },
+    })
+      .then((res) => {
+        if (cancelled) return;
+        const out = res.lines.filter(Boolean);
+        setLines(out);
+        if (out.length) saveCachedSummary(item.id, out);
+      })
+      .catch((e: Error) => {
+        if (!cancelled) setSummaryError(e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSummary(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item?.id]);
 
   if (!item) {
     return (
@@ -93,6 +123,8 @@ function ArticlePage() {
   }
 
   const hasSource = Boolean(item.url) && item.url !== "#";
+  const label = microLabel(item);
+  const fallback = item.summary;
 
   return (
     <div className="min-h-screen bg-background pb-28">
@@ -118,6 +150,13 @@ function ArticlePage() {
           )}
           <div className="space-y-3 px-4 py-4">
             <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              {label && (
+                <span
+                  className={`rounded-sm px-1.5 py-0.5 font-bold ${microLabelClass(label)}`}
+                >
+                  {label}
+                </span>
+              )}
               <span className="text-primary">{item.category}</span>
               <span>·</span>
               <span>{item.source}</span>
@@ -132,11 +171,26 @@ function ArticlePage() {
               {item.title}
             </h1>
 
-            <div className="space-y-3 text-sm leading-relaxed text-foreground/90">
-              {paragraphs.map((p, i) => (
-                <p key={i}>{p}</p>
-              ))}
-            </div>
+            {loadingSummary && lines.length === 0 ? (
+              <div className="flex items-center gap-2 rounded-md border border-border bg-background/30 p-3 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Writing a friendly recap of this story…
+              </div>
+            ) : lines.length > 0 ? (
+              <div className="space-y-2.5 text-sm leading-relaxed text-foreground/90">
+                {lines.map((p, i) => (
+                  <p key={i}>{p}</p>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm leading-relaxed text-foreground/90">{fallback}</p>
+            )}
+
+            {summaryError && (
+              <p className="font-mono text-[10px] uppercase tracking-wider text-destructive">
+                Couldn't generate a recap — showing source summary instead.
+              </p>
+            )}
 
             {hasSource && (
               <a
