@@ -9,8 +9,8 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TrendingRouteImport } from './routes/trending'
 import { Route as SubmitRouteImport } from './routes/submit'
-import { Route as SearchRouteImport } from './routes/search'
 import { Route as SavedRouteImport } from './routes/saved'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as AuthRouteImport } from './routes/auth'
@@ -19,14 +19,14 @@ import { Route as ArticleIdRouteImport } from './routes/article.$id'
 import { Route as ApiNewsRouteImport } from './routes/api/news'
 import { Route as ApiGeoRouteImport } from './routes/api/geo'
 
+const TrendingRoute = TrendingRouteImport.update({
+  id: '/trending',
+  path: '/trending',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SubmitRoute = SubmitRouteImport.update({
   id: '/submit',
   path: '/submit',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SearchRoute = SearchRouteImport.update({
-  id: '/search',
-  path: '/search',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SavedRoute = SavedRouteImport.update({
@@ -70,8 +70,8 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/profile': typeof ProfileRoute
   '/saved': typeof SavedRoute
-  '/search': typeof SearchRoute
   '/submit': typeof SubmitRoute
+  '/trending': typeof TrendingRoute
   '/api/geo': typeof ApiGeoRoute
   '/api/news': typeof ApiNewsRoute
   '/article/$id': typeof ArticleIdRoute
@@ -81,8 +81,8 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/profile': typeof ProfileRoute
   '/saved': typeof SavedRoute
-  '/search': typeof SearchRoute
   '/submit': typeof SubmitRoute
+  '/trending': typeof TrendingRoute
   '/api/geo': typeof ApiGeoRoute
   '/api/news': typeof ApiNewsRoute
   '/article/$id': typeof ArticleIdRoute
@@ -93,8 +93,8 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/profile': typeof ProfileRoute
   '/saved': typeof SavedRoute
-  '/search': typeof SearchRoute
   '/submit': typeof SubmitRoute
+  '/trending': typeof TrendingRoute
   '/api/geo': typeof ApiGeoRoute
   '/api/news': typeof ApiNewsRoute
   '/article/$id': typeof ArticleIdRoute
@@ -106,8 +106,8 @@ export interface FileRouteTypes {
     | '/auth'
     | '/profile'
     | '/saved'
-    | '/search'
     | '/submit'
+    | '/trending'
     | '/api/geo'
     | '/api/news'
     | '/article/$id'
@@ -117,8 +117,8 @@ export interface FileRouteTypes {
     | '/auth'
     | '/profile'
     | '/saved'
-    | '/search'
     | '/submit'
+    | '/trending'
     | '/api/geo'
     | '/api/news'
     | '/article/$id'
@@ -128,8 +128,8 @@ export interface FileRouteTypes {
     | '/auth'
     | '/profile'
     | '/saved'
-    | '/search'
     | '/submit'
+    | '/trending'
     | '/api/geo'
     | '/api/news'
     | '/article/$id'
@@ -140,8 +140,8 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   ProfileRoute: typeof ProfileRoute
   SavedRoute: typeof SavedRoute
-  SearchRoute: typeof SearchRoute
   SubmitRoute: typeof SubmitRoute
+  TrendingRoute: typeof TrendingRoute
   ApiGeoRoute: typeof ApiGeoRoute
   ApiNewsRoute: typeof ApiNewsRoute
   ArticleIdRoute: typeof ArticleIdRoute
@@ -149,18 +149,18 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/trending': {
+      id: '/trending'
+      path: '/trending'
+      fullPath: '/trending'
+      preLoaderRoute: typeof TrendingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/submit': {
       id: '/submit'
       path: '/submit'
       fullPath: '/submit'
       preLoaderRoute: typeof SubmitRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/search': {
-      id: '/search'
-      path: '/search'
-      fullPath: '/search'
-      preLoaderRoute: typeof SearchRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/saved': {
@@ -220,8 +220,8 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   ProfileRoute: ProfileRoute,
   SavedRoute: SavedRoute,
-  SearchRoute: SearchRoute,
   SubmitRoute: SubmitRoute,
+  TrendingRoute: TrendingRoute,
   ApiGeoRoute: ApiGeoRoute,
   ApiNewsRoute: ApiNewsRoute,
   ArticleIdRoute: ArticleIdRoute,

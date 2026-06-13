@@ -5,7 +5,6 @@ import type { NewsItem } from "@/lib/mock-news";
 import { TIMELINES } from "@/lib/mock-news";
 import { useAppState } from "@/hooks/use-app-state";
 import { timeAgo } from "@/lib/format";
-import { microLabel, microLabelClass } from "@/lib/micro-label";
 import { TimelineSheet } from "./TimelineSheet";
 import { ReactionBar } from "./ReactionBar";
 
@@ -17,23 +16,13 @@ export function NewsCard({ item }: Props) {
   const { award } = useAppState();
   const [openTimeline, setOpenTimeline] = useState(false);
   const timeline = item.timelineId ? TIMELINES[item.timelineId] : null;
-  const label = microLabel(item);
 
   return (
     <article className="overflow-hidden rounded-xl border border-border bg-surface-1">
       <div className="flex items-center justify-between border-b border-border px-4 py-2">
-        <div className="flex items-center gap-2">
-          {label && (
-            <span
-              className={`rounded-sm px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider ${microLabelClass(label)}`}
-            >
-              {label}
-            </span>
-          )}
-          <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-            {item.category}
-          </span>
-        </div>
+        <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+          {item.category}
+        </span>
         <span className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
           <Clock className="h-3 w-3" />
           {timeAgo(item.publishedAt)}
