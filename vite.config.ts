@@ -15,6 +15,8 @@ export default defineConfig({
   },
   // We pass the Vercel instruction directly to Nitro here without breaking Lovable's core setup
   nitro: {
-    preset: "vercel"
+  preset: "vercel",
+  imports: {
+    presets: ["@lovable/auth"]
   }
-});
+}
