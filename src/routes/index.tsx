@@ -214,7 +214,9 @@ function Home() {
         )}
         {!isLoading && items.length === 0 && !error && !data?.error && (
           <div className="rounded-xl border border-border bg-surface-1 p-6 text-center font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-            No {category} headlines for {countryMeta.name} right now.
+            {allItems.length > 0
+              ? `No ${category} headlines within the selected time window. Try a longer interval.`
+              : `No ${category} headlines for ${countryMeta.name} right now.`}
           </div>
         )}
         <div className="space-y-3">
