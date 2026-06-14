@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "frameworks": ["tanstack-start"],
+  "routes": [
+    {
+      "src": "/~oauth/(.*)",
+      "dest": "/src/server.ts"
+    },
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/"
+    }
+  ]
+}
