@@ -135,9 +135,17 @@ function Home() {
       image: p.media?.find((m) => m.type === "image")?.dataUrl,
     }));
 
-  const items: NewsItem[] = [...userItems, ...apiItems].sort(
+  const allItems: NewsItem[] = [...userItems, ...apiItems].sort(
     (a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt),
   );
+  // Time selector now also filters the feed to items published within the
+  // chosen window (e.g. "5 min" shows only items <5 min old). "Off" disables
+  // the filter so the full feed is visible.
+  const now = Date.now();
+  const items: NewsItem[] =
+    refreshMs > 0
+      ? allItems.filter((i) => now - +new Date(i.publishedAt) <= refreshMs)
+      : allItems;
 
   // Persist items so the article detail page can render them after navigation.
   useEffect(() => {
