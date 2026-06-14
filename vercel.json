@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "frameworks": ["tanstack-start"],
+  "framework": "tanstack-start",
   "routes": [
     {
       "src": "/~oauth/(.*)",
