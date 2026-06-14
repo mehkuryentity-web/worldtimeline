@@ -1,17 +1,15 @@
 {
   "version": 2,
-  "framework": "tanstack-start",
+  "builds": [
+    {
+      "src": "src/server.ts",
+      "use": "@vercel/node"
+    }
+  ],
   "routes": [
     {
-      "src": "/~oauth/(.*)",
-      "dest": "/src/server.ts"
-    },
-    {
-      "handle": "filesystem"
-    },
-    {
       "src": "/(.*)",
-      "dest": "/"
+      "dest": "src/server.ts"
     }
   ]
 }
