@@ -13,10 +13,11 @@ export default defineConfig({
     // nitro/vite builds from this
     server: { entry: "server" },
   },
-  // We pass the Vercel instruction directly to Nitro here without breaking Lovable's core setup
+    // We pass the Vercel instruction directly to Nitro here without breaking Lovable's core setup
   nitro: {
-  preset: "vercel",
-  imports: {
-    presets: ["@lovable/auth"]
+    preset: "vercel",
+    imports: {
+      presets: ["@lovable/auth"]
+    }
   }
-}
+});
