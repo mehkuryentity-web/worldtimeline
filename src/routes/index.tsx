@@ -149,7 +149,7 @@ function Home() {
 
   // Persist items so the article detail page can render them after navigation.
   useEffect(() => {
-    if (items.length) cacheArticles(items);
+    if (allItems.length) cacheArticles(allItems);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.fetchedAt, state.userPosts.length]);
 
