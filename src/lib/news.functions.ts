@@ -32,39 +32,38 @@ export const generateBriefing = async (data: { headlines: string[] }): Promise<{
     return { summary: "No headlines available to summarize." };
   }
 
+  // Your live Gemini API Key integrated directly
+  const GEMINI_API_KEY = "AIzaSyDNgGHldmvi__dkox9sXOvnwuyi8AyJztU";
+
   try {
-    // Using an open access endpoint to ensure your prompt processes flawlessly on the frontend
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    // Official Google Gemini API direct endpoint
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+    const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          {
-            role: "system",
-            content: "You are a premier global intelligence editor. Analyze the provided headlines and merge them into a single, masterful, unified macro-briefing paragraph. DO NOT summarize them one by one. Use sophisticated, sharp editorial transitions (e.g., 'While UK leadership intensifies geopolitical pressure, simultaneous structural shifts...'). Strictly forbidden: bullet points, lists, headers, or bold keys. Write exactly one dense, authoritative paragraph.",
-          },
-          {
-            role: "user",
-            content: data.headlines.slice(0, 5).join("\n"),
-          },
-        ],
+        contents: [{
+          parts: [{
+            text: `You are a premier global intelligence editor. Analyze these headlines and merge them into a single, masterful, unified macro-briefing paragraph. DO NOT summarize them one by one as a list. Blend them together into a continuous narrative using sophisticated editorial transitions (e.g., 'While structural changes shift global market dynamics, simultaneous developments in...'). Strictly forbidden: bullet points, lists, headers, or bold text keys. Write exactly one dense, authoritative paragraph:\n\n${data.headlines.slice(0, 5).join("\n")}`
+          }]
+        }]
       }),
     });
 
     if (!res.ok) {
-      return { summary: data.headlines.slice(0, 4).join(" ") };
+      throw new Error(`Gemini API error: ${res.statusText}`);
     }
 
     const json = await res.json();
-    const summary = json.choices?.[0]?.message?.content?.trim() ?? "";
+    const summary = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
     return { summary: summary || data.headlines.slice(0, 4).join(" ") };
   } catch (e) {
     return {
       summary: data.headlines.slice(0, 4).join(" "),
-      error: e instanceof Error ? e.message : "AI processing failed",
+      error: e instanceof Error ? e.message : "Gemini failed",
     };
   }
 };
