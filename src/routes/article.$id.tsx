@@ -73,22 +73,20 @@ function ArticlePage() {
   useEffect(() => {
     if (!item) return;
     if (lines.length > 0) return;
+
     let cancelled = false;
     setLoadingSummary(true);
     setSummaryError(null);
 
+    // Updated payload to send the full content field to the function
     const payload = {
       id: item.id,
       title: item.title,
-      summary: item.summary,
+      content: item.content,
       source: item.source,
       url: item.url,
     };
 
-    // Try the TanStack server function first (works on Lovable hosting where
-    // LOVABLE_API_KEY is auto-injected). If it fails (e.g. on Vercel where
-    // the env var isn't present), fall back to the Supabase Edge Function
-    // which always has access to the key via Lovable Cloud secrets.
     const run = async () => {
       try {
         const res = await callSummary({ data: payload });
@@ -115,6 +113,7 @@ function ArticlePage() {
       .finally(() => {
         if (!cancelled) setLoadingSummary(false);
       });
+
     return () => {
       cancelled = true;
     };
@@ -167,12 +166,11 @@ function ArticlePage() {
               }}
             />
           )}
+
           <div className="space-y-3 px-4 py-4">
             <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
               {label && (
-                <span
-                  className={`rounded-sm px-1.5 py-0.5 font-bold ${microLabelClass(label)}`}
-                >
+                <span className={`rounded-sm px-1.5 py-0.5 font-bold ${microLabelClass(label)}`}>
                   {label}
                 </span>
               )}
@@ -182,18 +180,17 @@ function ArticlePage() {
               <span>·</span>
               <span>{item.region}</span>
               <span className="ml-auto flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                {timeAgo(item.publishedAt)}
+                <Clock className="h-3 w-3" /> {timeAgo(item.publishedAt)}
               </span>
             </div>
+
             <h1 className="text-xl font-semibold leading-tight tracking-tight">
               {item.title}
             </h1>
 
             {loadingSummary && lines.length === 0 ? (
               <div className="flex items-center gap-2 rounded-md border border-border bg-background/30 p-3 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Writing a friendly recap of this story…
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Writing a friendly recap of this story…
               </div>
             ) : lines.length > 0 ? (
               <div className="space-y-2.5 text-sm leading-relaxed text-foreground/90">
@@ -219,8 +216,7 @@ function ArticlePage() {
                 onClick={() => award("read_article")}
                 className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 font-mono text-[11px] uppercase tracking-wider text-primary-foreground"
               >
-                Read full article at source
-                <ExternalLink className="h-3.5 w-3.5" />
+                Read full article at source <ExternalLink className="h-3.5 w-3.5" />
               </a>
             )}
           </div>
@@ -232,3 +228,4 @@ function ArticlePage() {
     </div>
   );
 }
+
