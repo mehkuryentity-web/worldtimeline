@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, Sparkles, Loader2 } from "lucide-react";
-import { useServerFn } from "@tanstack/react-start";
 import { useAppState } from "@/hooks/use-app-state";
 import { generateBriefing } from "@/lib/news.functions";
 
@@ -17,16 +16,18 @@ export function AISummaryCard({ headlines }: Props) {
   const [tick, setTick] = useState(0);
   const { award } = useAppState();
   const awarded = useRef(false);
-  const briefing = useServerFn(generateBriefing);
   const lastKey = useRef<string>("");
 
   const generate = async (hl: string[]) => {
     if (hl.length === 0) return;
     setLoading(true);
     try {
-      const res = await briefing({ data: { headlines: hl } });
+      // Call the function directly without the TanStack wrapper wrapper
+      const res = await generateBriefing({ headlines: hl });
       setSummary(res.summary);
       setRefreshedAt(new Date());
+    } catch (error) {
+      console.error("Failed to generate briefing:", error);
     } finally {
       setLoading(false);
     }
@@ -38,14 +39,12 @@ export function AISummaryCard({ headlines }: Props) {
     if (!key || key === lastKey.current) return;
     lastKey.current = key;
     generate(headlines);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [headlines.join("|")]);
 
   // 5-minute auto refresh
   useEffect(() => {
     const id = setInterval(() => generate(headlines), REFRESH_MS);
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [headlines.join("|")]);
 
   useEffect(() => {
