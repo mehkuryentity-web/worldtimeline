@@ -1,82 +1,33 @@
-import { createServerFn } from "@tanstack/react-start";
+import { createServerFn } from "@tanstack/start";
 import { z } from "zod";
 
-export interface ApiNewsItem {
+interface ApiNewsItem {
   id: string;
-  category: string;
   title: string;
-  source: string;
-  region: string;
-  publishedAt: string;
-  summary: string;
+  description: string;
   url: string;
-  image?: string;
-  breaking?: boolean;
+  author: string;
+  image: string;
+  language: string;
+  category: string[];
+  published: string;
 }
 
-const CATEGORY_MAP: Record<string, string | null> = {
-  Top: null,
-  World: "world",
-  Politics: "politics",
-  Business: "business",
-  Tech: "technology",
-  Science: "science",
-  Sports: "sports",
-  Climate: "environment",
-  Health: "health",
-};
-
-const CACHE_TTL_MS = 60_000;
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return "source";
-  }
-}
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 async function fetchFromCurrents(category: string, apiKey: string): Promise<ApiNewsItem[]> {
-  const mapped = CATEGORY_MAP[category];
-  const url = new URL("https://api.currentsapi.services/v1/latest-news");
-  url.searchParams.set("language", "en");
-  if (mapped) url.searchParams.set("category", mapped);
-  url.searchParams.set("apiKey", apiKey);
+  const targetCategory = category === "all" ? "" : category;
+  const url = `https://api.currentsapi.services/v1/latest-news?apiKey=${apiKey}&language=en${
+    targetCategory ? `&category=${targetCategory}` : ""
+  }`;
 
-  const res = await fetch(url.toString(), {
-    headers: { Accept: "application/json" },
-  });
-  if (!res.ok) {
-    throw new Error(`CurrentsAPI ${res.status}`);
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Currents API error: ${response.statusText}`);
   }
-  const json = (await res.json()) as {
-    status?: string;
-    news?: Array<{
-      id?: string;
-      title: string;
-      description?: string;
-      url: string;
-      image?: string;
-      published?: string;
-      author?: string;
-      category?: string[];
-    }>;
-  };
-  const news = json.news ?? [];
-  return news
-    .filter((n) => n.title && n.url)
-    .slice(0, 30)
-    .map((n, i) => ({
-      id: n.id ?? `${category}-${i}-${n.url}`,
-      category,
-      title: n.title,
-      source: n.author && n.author !== "None" ? n.author : hostOf(n.url),
-      region: (n.category && n.category[0]) || "Global",
-      publishedAt: n.published ? new Date(n.published.replace(" +0000", "Z")).toISOString() : new Date().toISOString(),
-      summary: n.description ?? "",
-      url: n.url,
-      image: n.image && n.image !== "None" ? n.image : undefined,
-    }));
+
+  const data = await response.json();
+  return (data.news || []) as ApiNewsItem[];
 }
 
 export const fetchLiveNews = createServerFn({ method: "GET" })
@@ -104,7 +55,9 @@ export const fetchLiveNews = createServerFn({ method: "GET" })
 
     try {
       const items = await fetchFromCurrents(data.category, apiKey);
-      await supabaseAdmin.from("news_cache").insert({ category: data.category, payload: items as unknown as never });
+      await supabaseAdmin
+        .from("news_cache")
+        .insert({ category: data.category, payload: items as unknown as never });
       return { items, cached: false };
     } catch (e) {
       // Fall back to most recent cache, even if stale
@@ -115,6 +68,7 @@ export const fetchLiveNews = createServerFn({ method: "GET" })
         .order("fetched_at", { ascending: false })
         .limit(1)
         .maybeSingle();
+
       if (stale?.payload) return { items: stale.payload as unknown as ApiNewsItem[], cached: true };
       return { items: [], cached: false, error: e instanceof Error ? e.message : "Fetch failed" };
     }
@@ -127,6 +81,7 @@ export const generateBriefing = createServerFn({ method: "POST" })
     if (!apiKey || data.headlines.length === 0) {
       return { summary: data.headlines.slice(0, 4).map((h) => `• ${h}`).join("\n") };
     }
+
     try {
       const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
@@ -139,8 +94,19 @@ export const generateBriefing = createServerFn({ method: "POST" })
           messages: [
             {
               role: "system",
-              content:
-                "You are WorldTimeline's editor. Write a 3-4 sentence global briefing connecting the headlines. Terse, neutral wire-style. No bullets, no headings, no preamble.",
+              content: `You are a premier global intelligence editor synthesizing the absolute top stories for an elite, fast-paced news timeline app.
+Analyze the provided list of top headlines and merge them into a single, masterful, unified macro-briefing.
+
+CRITICAL CONTENT & COHESION RULES:
+- DO NOT summarize the articles one by one. 
+- Seamlessly blend the events together using smooth transitions (e.g., "While tech sectors brace for...", "Simultaneously, geopolitical shifts in...", "In tandem with these market movements...").
+- Capture both the immediate events and their collective broader global impact, trends, or power shifts.
+
+CRITICAL STRUCTURE RULES:
+- STRICTLY FORBIDDEN: Bullet points, lists, bolding, titles, or headers of any kind.
+- Write your entire response as EXACTLY ONE fluid, heavy-hitting paragraph.
+- The total length must be substantial and dense, exactly 5 to 7 lines long total.
+- Use a highly sophisticated, sharp, active, and authoritative editorial voice. Completely eliminate introductory filler.`,
             },
             {
               role: "user",
@@ -149,10 +115,12 @@ export const generateBriefing = createServerFn({ method: "POST" })
           ],
         }),
       });
+
       if (!res.ok) {
         const t = await res.text();
         return { summary: data.headlines.slice(0, 4).map((h) => `• ${h}`).join("\n"), error: `AI ${res.status}: ${t.slice(0, 120)}` };
       }
+
       const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
       const summary = json.choices?.[0]?.message?.content?.trim() ?? "";
       return { summary: summary || data.headlines.slice(0, 4).map((h) => `• ${h}`).join("\n") };
@@ -163,3 +131,4 @@ export const generateBriefing = createServerFn({ method: "POST" })
       };
     }
   });
+
