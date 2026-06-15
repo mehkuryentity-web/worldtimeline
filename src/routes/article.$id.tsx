@@ -10,6 +10,7 @@ import { timeAgo } from "@/lib/format";
 import { useAppState } from "@/hooks/use-app-state";
 import { microLabel, microLabelClass } from "@/lib/micro-label";
 import { generateArticleSummary } from "@/lib/article-summary.functions";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/article/$id")({
   head: () => ({
@@ -75,18 +76,36 @@ function ArticlePage() {
     let cancelled = false;
     setLoadingSummary(true);
     setSummaryError(null);
-    callSummary({
-      data: {
-        id: item.id,
-        title: item.title,
-        summary: item.summary,
-        source: item.source,
-        url: item.url,
-      },
-    })
-      .then((res) => {
+
+    const payload = {
+      id: item.id,
+      title: item.title,
+      summary: item.summary,
+      source: item.source,
+      url: item.url,
+    };
+
+    // Try the TanStack server function first (works on Lovable hosting where
+    // LOVABLE_API_KEY is auto-injected). If it fails (e.g. on Vercel where
+    // the env var isn't present), fall back to the Supabase Edge Function
+    // which always has access to the key via Lovable Cloud secrets.
+    const run = async () => {
+      try {
+        const res = await callSummary({ data: payload });
+        return res.lines.filter(Boolean);
+      } catch {
+        const { data, error } = await supabase.functions.invoke("article-summary", {
+          body: payload,
+        });
+        if (error) throw error;
+        const out = (data as { lines?: string[] })?.lines ?? [];
+        return out.filter(Boolean);
+      }
+    };
+
+    run()
+      .then((out) => {
         if (cancelled) return;
-        const out = res.lines.filter(Boolean);
         setLines(out);
         if (out.length) saveCachedSummary(item.id, out);
       })
