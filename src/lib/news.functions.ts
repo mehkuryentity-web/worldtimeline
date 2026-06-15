@@ -10,19 +10,15 @@ interface ApiNewsItem {
   published: string;
 }
 
-// 1. Plain JavaScript Fetch for News (No TanStack Server Functions)
 export const fetchLiveNews = async (data: { category: string }): Promise<{ items: ApiNewsItem[]; cached: boolean; error?: string }> => {
   try {
     const targetCategory = data.category === "all" ? "" : data.category;
-    // Calling the API directly from the client side safely
     const url = `https://api.currentsapi.services/v1/latest-news?language=en${
       targetCategory ? `&category=${targetCategory}` : ""
     }`;
 
     const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Currents API error: ${response.statusText}`);
-    }
+    if (!response.ok) throw new Error(`API error: ${response.statusText}`);
 
     const result = await response.json();
     return { items: (result.news || []) as ApiNewsItem[], cached: false };
@@ -31,14 +27,14 @@ export const fetchLiveNews = async (data: { category: string }): Promise<{ items
   }
 };
 
-// 2. Plain JavaScript Fetch for AI Briefing (No TanStack Server Functions)
 export const generateBriefing = async (data: { headlines: string[] }): Promise<{ summary: string; error?: string }> => {
   if (data.headlines.length === 0) {
     return { summary: "No headlines available to summarize." };
   }
 
   try {
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    // Using an open access endpoint to ensure your prompt processes flawlessly on the frontend
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -48,11 +44,11 @@ export const generateBriefing = async (data: { headlines: string[] }): Promise<{
         messages: [
           {
             role: "system",
-            content: "You are an executive intelligence editor. Summarize the top 4-5 news stories into exactly one smooth, high-density, authoritative narrative paragraph. Do not use bullet points, headers, or list formatting. Blend the stories together using fluid editorial transitions.",
+            content: "You are a premier global intelligence editor. Analyze the provided headlines and merge them into a single, masterful, unified macro-briefing paragraph. DO NOT summarize them one by one. Use sophisticated, sharp editorial transitions (e.g., 'While UK leadership intensifies geopolitical pressure, simultaneous structural shifts...'). Strictly forbidden: bullet points, lists, headers, or bold keys. Write exactly one dense, authoritative paragraph.",
           },
           {
             role: "user",
-            content: data.headlines.map((h, i) => `${i + 1}. ${h}`).join("\n"),
+            content: data.headlines.slice(0, 5).join("\n"),
           },
         ],
       }),
@@ -68,7 +64,7 @@ export const generateBriefing = async (data: { headlines: string[] }): Promise<{
   } catch (e) {
     return {
       summary: data.headlines.slice(0, 4).join(" "),
-      error: e instanceof Error ? e.message : "AI failed",
+      error: e instanceof Error ? e.message : "AI processing failed",
     };
   }
 };
