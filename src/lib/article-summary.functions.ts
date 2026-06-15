@@ -1,69 +1,36 @@
-import { createServerFn } from "@tanstack/react-start";
+import { supabase } from "@/integrations/supabase/client";
 
-export const generateArticleSummary = createServerFn({ method: "POST" })
-  .inputValidator(
-    (input: {
-      id: string;
-      title: string;
-      summary: string;
-      source: string;
-      url: string;
-    }) => input,
-  )
-  .handler(async ({ data }) => {
-    const apiKey = process.env.LOVABLE_API_KEY;
-    if (!apiKey) {
-      throw new Error("LOVABLE_API_KEY is not configured");
-    }
+interface SummaryPayload {
+  id: string;
+  title: string;
+  content?: string;
+  summary?: string;
+  source?: string;
+  url?: string;
+}
 
-    const system = [
-      "You are a witty news blogger.",
-      "Rewrite the given news as a lively, jovial, active-voice summary the reader can enjoy.",
-      "Output EXACTLY 10 short standalone sentences, one per line, no numbering, no bullets, no headings.",
-      "Every sentence must be strictly about the news itself — concrete facts, people, places, numbers, quotes, consequences.",
-      "Do NOT include meta commentary like 'why it matters', 'what to watch', 'context', 'how to read this', source disclaimers, or generic safety notes.",
-      "Do NOT invent facts beyond what's in the input; if details are thin, rephrase and elaborate naturally from what's given without fabricating new specifics.",
-      "Keep it warm and conversational, like a smart friend recapping the story.",
-    ].join(" ");
-
-    const user = [
-      `Headline: ${data.title}`,
-      `Source: ${data.source}`,
-      `URL: ${data.url}`,
-      `Source summary: ${data.summary}`,
-      "",
-      "Write the 10-line blogger summary now.",
-    ].join("\n");
-
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+export const generateArticleSummary = async ({ data }: { data: SummaryPayload }) => {
+  try {
+    // Send the full content field directly to the Edge Function
+    const { data: responseData, error } = await supabase.functions.invoke("article-summary", {
+      body: {
+        title: data.title,
+        content: data.content || data.summary || "",
       },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-      }),
     });
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`AI gateway error ${res.status}: ${text.slice(0, 200)}`);
-    }
+    if (error) throw error;
 
-    const json = (await res.json()) as {
-      choices?: { message?: { content?: string } }[];
-    };
-    const content = json.choices?.[0]?.message?.content?.trim() ?? "";
+    // Split the text result into lines for the UI to map over
+    const recapText = responseData?.recap || "";
+    const lines = recapText
+      .split("\n")
+      .map((line: string) => line.trim())
+      .filter((line: string) => line.length > 0);
 
-    const lines = content
-      .split(/\r?\n+/)
-      .map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
-      .filter(Boolean);
-
-    return { id: data.id, lines };
-  });
+    return { lines };
+  } catch (error: any) {
+    console.error("Error in generateArticleSummary server function:", error);
+    throw new Error(error.message || "Failed to generate summary");
+  }
+};
