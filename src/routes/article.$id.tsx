@@ -8,6 +8,7 @@ import { getCachedArticle, type NewsItem } from "@/lib/mock-news";
 import { timeAgo } from "@/lib/format";
 import { useAppState } from "@/hooks/use-app-state";
 import { microLabel, microLabelClass } from "@/lib/micro-label";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/article/$id")({
   head: () => ({
@@ -71,41 +72,40 @@ export function ArticlePage() {
     award("read_summary");
   }, [id]);
 
-  // DIAGNOSTIC PHASE 1: Raw Fetch Trigger Logic
+  // PHASE 2: Direct Supabase Edge Function Dispatch
   const handleTestClick = async () => {
-    console.log("CORE PROOF BUTTON CLICKED - INITIATING RAW FETCH DISPATCH");
+    console.log("DISPATCHING DIRECTLY TO SUPABASE EDGE FUNCTION");
     setLoadingSummary(true);
     setSummaryError(null);
 
     try {
-      const res = await fetch("/api/generateArticleSummary", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const { data, error } = await supabase.functions.invoke("article-summary", {
+        body: {
           id: item?.id,
           title: item?.title,
           content: item?.content,
           source: item?.source,
           url: item?.url,
-        }),
+        },
       });
 
-      console.log("NETWORK RESPONSE STATUS CODE:", res.status);
-      const data = await res.json();
-      console.log("RAW CLIENT-SIDE PAYLOAD RECEIVED:", data);
+      if (error) throw error;
 
-      if (data && data.lines) {
-        const activeLines = data.lines.filter(Boolean);
+      console.log("SUPABASE RAW RESPONSE:", data);
+      const out = (data as { lines?: string[] })?.lines ?? [];
+      const activeLines = out.filter(Boolean);
+
+      if (activeLines.length > 0) {
         setLines(activeLines);
         if (item?.id) saveCachedSummary(item.id, activeLines);
-        alert("SUCCESS: Response parsed by browser context. Verify Vercel logs now.");
+        alert("SUCCESS! Supabase returned your premium executive summary.");
       } else {
-        alert(`HTTP Status ${res.status}: Executed but payload structure lacked array.`);
+        alert("Connected to Supabase, but returned data lines were empty.");
       }
     } catch (err) {
-      console.error("CRITICAL CLIENT DISPATCH FAILURE:", err);
+      console.error("SUPABASE CONNECTION CRASHED:", err);
       setSummaryError(String(err));
-      alert("CRITICAL: Dispatch killed at browser/client layer: " + String(err));
+      alert("Backend execution failed: " + String(err));
     } finally {
       setLoadingSummary(false);
     }
@@ -172,13 +172,13 @@ export function ArticlePage() {
               {item.title}
             </h1>
 
-            {/* DIAGNOSTIC TRIGGER INTERFACE */}
+            {/* LIVE SUPABASE TEST TRIGGER */}
             <button
               onClick={handleTestClick}
               type="button"
               className="w-full bg-red-600 text-white font-bold p-3.5 rounded-md uppercase tracking-wider text-xs my-3 block text-center active:bg-red-700"
             >
-              💥 Force Send Summary Request
+              💥 Connect Direct To Supabase
             </button>
 
             {loadingSummary && lines.length === 0 ? (
@@ -199,7 +199,7 @@ export function ArticlePage() {
 
             {summaryError && (
               <p className="font-mono text-[10px] uppercase tracking-wider text-destructive bg-destructive/10 p-3 rounded-md">
-                Runtime Error Trace: {summaryError}
+                Server Response Trace: {summaryError}
               </p>
             )}
 
