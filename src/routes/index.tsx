@@ -73,6 +73,7 @@ function Home() {
   const { state, award, update } = useAppState();
   const [country, setCountryState] = useState<string>(() => state.country ?? "GLOBAL");
   const [refreshMs, setRefreshMs] = useState<number>(5 * 60 * 1000);
+  const [preloadedSummaries, setPreloadedSummaries] = useState<Record<string, string>>({});
   const preloadedBatchesRef = useRef<Set<string>>(new Set());
   
   const countryMeta = findCountry(country);
@@ -110,7 +111,7 @@ function Home() {
     source: n.source,
     region: n.region,
     publishedAt: n.publishedAt,
-    summary: n.summary,
+    summary: preloadedSummaries[n.id] || n.summary, // Hydrate directly with preloaded summaries instantly
     url: n.url,
     image: n.image,
   }));
@@ -142,27 +143,20 @@ function Home() {
     if (allItems.length) cacheArticles(allItems);
   }, [data?.fetchedAt, state.userPosts.length]);
 
-  // Infinite Scroll Batch Preloader Loop
+  // Infinite Scroll Batch Preloader Loop with State Sync
   useEffect(() => {
     if (!items || items.length === 0) return;
 
-    // Grab up to the top 15 items currently accessible to the timeline view
     const itemsToPreload = items.slice(0, 15);
-    
-    // Group them into batches of 5
     const batchSize = 5;
+    
     for (let i = 0; i < itemsToPreload.length; i += batchSize) {
       const batch = itemsToPreload.slice(i, i + batchSize);
-      
-      // Build a unique tracking key for this batch of IDs
       const batchKey = batch.map((item) => item.id).sort().join(",");
       
-      // Skip if we already sent this batch to Supabase during this view lifecycle
       if (preloadedBatchesRef.current.has(batchKey)) continue;
-
       preloadedBatchesRef.current.add(batchKey);
 
-      // Cast properties to align with Edge Function expectations
       const formattedItems = batch.map((item) => ({
         id: item.id,
         title: item.title,
@@ -175,10 +169,13 @@ function Home() {
         published: item.publishedAt
       }));
 
-      // Fire-and-forget background preloading request
-      fetchPreloadedSummaries(formattedItems).catch((err) =>
-        console.error("Background preloading failed for batch:", err)
-      );
+      fetchPreloadedSummaries(formattedItems)
+        .then((newSummaries) => {
+          if (newSummaries && Object.keys(newSummaries).length > 0) {
+            setPreloadedSummaries((prev) => ({ ...prev, ...newSummaries }));
+          }
+        })
+        .catch((err) => console.error("Background preloading failed for batch:", err));
     }
   }, [items]);
 
