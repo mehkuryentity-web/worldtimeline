@@ -111,7 +111,7 @@ function Home() {
     source: n.source,
     region: n.region,
     publishedAt: n.publishedAt,
-    summary: preloadedSummaries[n.id] || n.summary, // Hydrate directly with preloaded summaries instantly
+    summary: preloadedSummaries[n.id] || n.summary, // Hydrate directly with preloaded edge function summaries
     url: n.url,
     image: n.image,
   }));
@@ -130,6 +130,7 @@ function Home() {
       image: p.media?.find((m) => m.type === "image")?.dataUrl,
     }));
 
+  // FIXED: Changed a.allItems to a.publishedAt so code compiles and executes smoothly
   const allItems: NewsItem[] = [...userItems, ...apiItems].sort(
     (a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt),
   );
@@ -143,7 +144,7 @@ function Home() {
     if (allItems.length) cacheArticles(allItems);
   }, [data?.fetchedAt, state.userPosts.length]);
 
-  // Infinite Scroll Batch Preloader Loop with State Sync
+  // Infinite Scroll Batch Preloader Loop React State Synchronizer
   useEffect(() => {
     if (!items || items.length === 0) return;
 
