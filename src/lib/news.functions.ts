@@ -32,12 +32,13 @@ export const generateBriefing = async (data: { headlines: string[] }): Promise<{
     return { summary: "No headlines available to summarize." };
   }
 
-  // Your live Gemini API Key integrated directly
   const GEMINI_API_KEY = "AIzaSyDNgGHldmvi__dkox9sXOvnwuyi8AyJztU";
 
   try {
-    // Official Google Gemini API direct endpoint
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+    // Strictly slice the incoming list to only use the top 5 stories
+    const topFiveHeadlines = data.headlines.slice(0, 5).join("\n");
 
     const res = await fetch(url, {
       method: "POST",
@@ -47,7 +48,7 @@ export const generateBriefing = async (data: { headlines: string[] }): Promise<{
       body: JSON.stringify({
         contents: [{
           parts: [{
-            text: `You are a premier global intelligence editor. Analyze these headlines and merge them into a single, masterful, unified macro-briefing paragraph. DO NOT summarize them one by one as a list. Blend them together into a continuous narrative using sophisticated editorial transitions (e.g., 'While structural changes shift global market dynamics, simultaneous developments in...'). Strictly forbidden: bullet points, lists, headers, or bold text keys. Write exactly one dense, authoritative paragraph:\n\n${data.headlines.slice(0, 5).join("\n")}`
+            text: `You are an elite intelligence editor. Review these 5 headlines and synthesize them into exactly ONE cohesive, fluid narrative paragraph. Your output must be concise and comfortably fit within about 6 to 7 lines of text on a mobile screen (around 90-110 words total). Do not summarize the headlines one by one. Blend them together seamlessly using sharp, professional transitions. Strictly forbidden: bullet points, lists, headers, or bold text formatting. Write exactly one authoritative, beautifully paced paragraph:\n\n${topFiveHeadlines}`
           }]
         }]
       }),
