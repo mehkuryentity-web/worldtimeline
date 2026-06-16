@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
@@ -12,7 +12,7 @@ import { CATEGORIES, type Category, type NewsItem, cacheArticles } from "@/lib/m
 import { findCountry } from "@/lib/countries";
 import { useAppState } from "@/hooks/use-app-state";
 import { Loader2, Timer } from "lucide-react";
-
+import { fetchPreloadedSummaries } from "@/lib/news.functions";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -20,14 +20,12 @@ export const Route = createFileRoute("/")({
       { title: "WorldTimeline — Real-time global news, intelligently summarized" },
       {
         name: "description",
-        content:
-          "High-speed personalized news aggregator. Live world events, AI briefings, event timelines, and rewards for engagement.",
+        content: "High-speed personalized news aggregator. Live world events, AI briefings, event timelines, and rewards for engagement.",
       },
       { property: "og:title", content: "WorldTimeline — Real-time global news" },
       {
         property: "og:description",
-        content:
-          "Live world events, AI briefings, event timelines, and rewards for engagement.",
+        content: "Live world events, AI briefings, event timelines, and rewards for engagement.",
       },
     ],
   }),
@@ -59,11 +57,9 @@ async function fetchNewsProxy(category: Category, country: string): Promise<News
   const res = await fetch(
     `/api/news?category=${encodeURIComponent(category)}&country=${encodeURIComponent(country)}`,
   );
-  // The proxy always returns JSON (even on upstream failure)
   return (await res.json()) as NewsResponse;
 }
 
-// Refresh interval options for the time selector.
 const REFRESH_OPTIONS = [
   { label: "5 min", ms: 5 * 60 * 1000 },
   { label: "10 min", ms: 10 * 60 * 1000 },
@@ -77,6 +73,8 @@ function Home() {
   const { state, award, update } = useAppState();
   const [country, setCountryState] = useState<string>(() => state.country ?? "GLOBAL");
   const [refreshMs, setRefreshMs] = useState<number>(5 * 60 * 1000);
+  const preloadedBatchesRef = useRef<Set<string>>(new Set());
+  
   const countryMeta = findCountry(country);
 
   const setCountry = (code: string) => {
@@ -96,7 +94,6 @@ function Home() {
         })
         .catch(() => {});
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
@@ -106,21 +103,18 @@ function Home() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Always render newest first so refreshes surface recency.
-  const apiItems: NewsItem[] = (data?.items ?? [])
-    .map((n) => ({
-      id: n.id,
-      category: (CATEGORIES.includes(n.category as Category) ? n.category : "Top") as Category,
-      title: n.title,
-      source: n.source,
-      region: n.region,
-      publishedAt: n.publishedAt,
-      summary: n.summary,
-      url: n.url,
-      image: n.image,
-    }));
+  const apiItems: NewsItem[] = (data?.items ?? []).map((n) => ({
+    id: n.id,
+    category: (CATEGORIES.includes(n.category as Category) ? n.category : "Top") as Category,
+    title: n.title,
+    source: n.source,
+    region: n.region,
+    publishedAt: n.publishedAt,
+    summary: n.summary,
+    url: n.url,
+    image: n.image,
+  }));
 
-  // Merge user-submitted posts (filtered to active category) into the feed.
   const userItems: NewsItem[] = (state.userPosts ?? [])
     .filter((p) => category === "Top" || p.category === category)
     .map((p) => ({
@@ -138,20 +132,55 @@ function Home() {
   const allItems: NewsItem[] = [...userItems, ...apiItems].sort(
     (a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt),
   );
-  // Time selector now also filters the feed to items published within the
-  // chosen window (e.g. "5 min" shows only items <5 min old). "Off" disables
-  // the filter so the full feed is visible.
-  const now = Date.now();
-  const items: NewsItem[] =
-    refreshMs > 0
-      ? allItems.filter((i) => now - +new Date(i.publishedAt) <= refreshMs)
-      : allItems;
 
-  // Persist items so the article detail page can render them after navigation.
+  const now = Date.now();
+  const items: NewsItem[] = refreshMs > 0 
+    ? allItems.filter((i) => now - +new Date(i.publishedAt) <= refreshMs) 
+    : allItems;
+
   useEffect(() => {
     if (allItems.length) cacheArticles(allItems);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.fetchedAt, state.userPosts.length]);
+
+  // Infinite Scroll Batch Preloader Loop
+  useEffect(() => {
+    if (!items || items.length === 0) return;
+
+    // Grab up to the top 15 items currently accessible to the timeline view
+    const itemsToPreload = items.slice(0, 15);
+    
+    // Group them into batches of 5
+    const batchSize = 5;
+    for (let i = 0; i < itemsToPreload.length; i += batchSize) {
+      const batch = itemsToPreload.slice(i, i + batchSize);
+      
+      // Build a unique tracking key for this batch of IDs
+      const batchKey = batch.map((item) => item.id).sort().join(",");
+      
+      // Skip if we already sent this batch to Supabase during this view lifecycle
+      if (preloadedBatchesRef.current.has(batchKey)) continue;
+
+      preloadedBatchesRef.current.add(batchKey);
+
+      // Cast properties to align with Edge Function expectations
+      const formattedItems = batch.map((item) => ({
+        id: item.id,
+        title: item.title,
+        description: item.summary || "",
+        url: item.url || "",
+        author: item.source || "Unknown",
+        image: item.image || "",
+        language: "en",
+        category: [item.category],
+        published: item.publishedAt
+      }));
+
+      // Fire-and-forget background preloading request
+      fetchPreloadedSummaries(formattedItems).catch((err) =>
+        console.error("Background preloading failed for batch:", err)
+      );
+    }
+  }, [items]);
 
   return (
     <div className="min-h-screen bg-background pb-28">
@@ -159,7 +188,6 @@ function Home() {
       <Ticker items={items.slice(0, 8).map((i) => i.title)} />
       <main className="mx-auto max-w-md space-y-4 px-4 pb-6 pt-4">
         <AISummaryCard headlines={items.slice(0, 6).map((i) => i.title)} />
-
         <div className="flex items-center justify-between gap-2">
           <CountrySelector value={country} onChange={setCountry} />
           {data?.cached && (
@@ -168,14 +196,10 @@ function Home() {
             </span>
           )}
         </div>
-
         <CategoryTabs value={category} onChange={setCategory} />
-
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            {country === "GLOBAL"
-              ? "Global feed · newest first"
-              : `${countryMeta.flag} ${countryMeta.name} · ${category}`}
+            {country === "GLOBAL" ? "Global feed · newest first" : `${countryMeta.flag} ${countryMeta.name} · ${category}`}
           </h2>
           <div className="flex items-center gap-1.5">
             <Timer className="h-3 w-3 text-muted-foreground" />
@@ -200,8 +224,6 @@ function Home() {
             </button>
           </div>
         </div>
-
-
         {isLoading && items.length === 0 && (
           <div className="flex items-center justify-center gap-2 rounded-xl border border-border bg-surface-1 py-10 text-xs text-muted-foreground">
             <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading feed…
