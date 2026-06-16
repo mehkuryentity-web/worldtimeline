@@ -60,7 +60,6 @@ export function ArticlePage() {
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
-  // Automated stable loading block triggered on mount
   useEffect(() => {
     const freshItem = getCachedArticle(id);
     setItem(freshItem);
@@ -86,7 +85,7 @@ export function ArticlePage() {
         body: {
           id: targetItem.id,
           title: targetItem.title,
-          content: targetItem.content,
+          content: targetItem.summary, // Maps to the correct '.summary' field from mock-news.ts
           source: targetItem.source,
           url: targetItem.url,
         },
@@ -184,12 +183,12 @@ export function ArticlePage() {
                 ))}
               </div>
             ) : summaryError ? (
-              <p className="font-mono text-[10px] uppercase tracking-wider text-destructive bg-destructive/10 p-3 rounded-md">
+              <div className="font-mono text-[10px] uppercase tracking-wider text-destructive bg-destructive/10 p-3 rounded-md">
                 {summaryError}
-              </p>
+              </div>
             ) : (
               <div className="flex items-center gap-2 rounded-md border border-border bg-background/30 p-3 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Preparing system update...
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Preparing premium summary...
               </div>
             )}
 
