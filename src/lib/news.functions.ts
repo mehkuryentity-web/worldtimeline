@@ -45,7 +45,7 @@ export const generateBriefing = async (data: { headlines: string[] }): Promise<{
       return { summary: "Aggregating regional news fields..." };
     }
 
-    const promptText = `You are an elite intelligence editor. Review these headlines and synthesize them into exactly ONE cohesive, fluid narrative paragraph. Your output must be concise and comfortably fit within about 6 to 7 lines of text on a mobile screen (around 90-110 words total). Do not summarize the headlines one by one. Blend them together seamlessly using sharp, professional transitions. Strictly forbidden: bullet points, lists, headers, or bold text formatting. Write exactly one authoritative, beautifully paced paragraph:\n\n${cleanHeadlines.join("\n")}`;
+    const promptText = `You are an elite intelligence editor. Review these headlines and synthesize them into exactly ONE cohesive, fluid narrative paragraph. Your output must be comprehensive and comfortably fit within about 6 to 7 lines of text on a mobile screen (around 90-110 words total). Do not summarize the headlines one by one. Blend them together seamlessly using sharp, professional transitions. Strictly forbidden: bullet points, lists, headers, or bold text formatting. Write exactly one authoritative, beautifully paced paragraph:\n\n${cleanHeadlines.join("\n")}`;
 
     const res = await fetch(url, {
       method: "POST",
@@ -65,7 +65,7 @@ export const generateBriefing = async (data: { headlines: string[] }): Promise<{
   } catch (e) {
     console.error("Briefing generation failed:", e);
     return {
-      summary: "Updating global timeline events and generating real-time AI brief summaries...",
+      summary: "Gathering and synthesizing the latest updates...",
       error: e instanceof Error ? e.message : "Gemini failed",
     };
   }
@@ -79,7 +79,17 @@ export const fetchPreloadedSummaries = async (items: ApiNewsItem[]): Promise<Rec
 
   try {
     const url = "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/article-summary";
-    const SUPABASE_ANON_KEY = (import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) || "";
+    
+    // Matched exactly to your live Vercel environment variable setup
+    const SUPABASE_KEY = 
+      (import.meta.env && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) || 
+      (window as any)._env_?.VITE_SUPABASE_PUBLISHABLE_KEY || 
+      "";
+
+    if (!SUPABASE_KEY) {
+      console.error("VITE_SUPABASE_PUBLISHABLE_KEY is missing from execution environment.");
+      return {};
+    }
 
     const normalizedItems = items.map(item => ({
       id: item.id,
@@ -97,7 +107,7 @@ export const fetchPreloadedSummaries = async (items: ApiNewsItem[]): Promise<Rec
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`
+        "Authorization": `Bearer ${SUPABASE_KEY}`
       },
       body: JSON.stringify({ articles: normalizedItems })
     });
