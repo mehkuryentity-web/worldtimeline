@@ -54,19 +54,18 @@ function saveCachedSummary(id: string, lines: string[]) {
   }
 }
 
-function ArticlePage() {
+export function ArticlePage() {
   const { id } = Route.useParams();
   const { award } = useAppState();
-  
   const [item, setItem] = useState<NewsItem | null>(() => getCachedArticle(id));
-  
-  // Hydrate from localStorage array OR fall back directly to the preloaded edge summary string
+
   const [lines, setLines] = useState<string[]>(() => {
     const cachedArray = loadCachedSummary(id);
     if (cachedArray && cachedArray.length > 0) return cachedArray;
     
     const cachedArt = getCachedArticle(id);
-    if (cachedArt && cachedArt.summary && !cachedArt.summary.startsWith("Writing a friendly")) {
+    // Only pre-fill state if the existing summary is long enough to be an actual premium brief
+    if (cachedArt && cachedArt.summary && cachedArt.summary.length > 200 && !cachedArt.summary.startsWith("Writing a friendly")) {
       return [cachedArt.summary];
     }
     return [];
@@ -79,23 +78,25 @@ function ArticlePage() {
   useEffect(() => {
     const freshItem = getCachedArticle(id);
     setItem(freshItem);
-    
     const cachedArray = loadCachedSummary(id);
     if (cachedArray && cachedArray.length > 0) {
       setLines(cachedArray);
-    } else if (freshItem && freshItem.summary && !freshItem.summary.startsWith("Writing a friendly")) {
+    } else if (freshItem && freshItem.summary && freshItem.summary.length > 200 && !freshItem.summary.startsWith("Writing a friendly")) {
       setLines([freshItem.summary]);
     } else {
       setLines([]);
     }
-    
     award("read_summary");
   }, [id]);
 
   useEffect(() => {
     if (!item) return;
-    // CRITICAL: If we already have a preloaded summary, DO NOT run the on-demand generation loop
-    if (lines.length > 0) return;
+    
+    // CRITICAL FIX: Identify if the summary on hand is just a short raw fallback snippet (< 200 chars)
+    const isUselessSnippet = lines.length === 1 && lines[0].length < 200;
+
+    // Only skip generation if we have a real, long premium executive summary stored
+    if (lines.length > 0 && !isUselessSnippet) return;
 
     let cancelled = false;
     setLoadingSummary(true);
@@ -208,16 +209,18 @@ function ArticlePage() {
             
             {loadingSummary && lines.length === 0 ? (
               <div className="flex items-center gap-2 rounded-md border border-border bg-background/30 p-3 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Writing a friendly recap of this story…
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Writing an executive summary...
               </div>
-            ) : lines.length > 0 ? (
+            ) : lines.length > 0 && !(lines.length === 1 && lines[0].length < 200) ? (
               <div className="space-y-2.5 text-sm leading-relaxed text-foreground/90">
                 {lines.map((p, i) => (
                   <p key={i}>{p}</p>
                 ))}
               </div>
             ) : (
-              <p className="text-sm leading-relaxed text-foreground/90">{fallback}</p>
+              <div className="flex items-center gap-2 rounded-md border border-border bg-background/30 p-3 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Updating brief to premium tier...
+              </div>
             )}
 
             {summaryError && !fallback && (
@@ -225,7 +228,6 @@ function ArticlePage() {
                 Couldn't generate a recap — showing source summary instead.
               </p>
             )}
-
             {hasSource && (
               <a
                 href={item.url}
