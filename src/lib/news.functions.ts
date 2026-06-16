@@ -35,7 +35,13 @@ export const generateBriefing = async (data: { headlines: string[] }): Promise<{
     return { summary: "Synthesizing live breaking news channels..." };
   }
 
-  const GEMINI_API_KEY = "AIzaSyDNgGHldmvi__dkox9sXOvnwuyi8AyJztU";
+  // Securely reads the key you just added to your Vercel Dashboard
+  const GEMINI_API_KEY = (import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) || "";
+
+  if (!GEMINI_API_KEY) {
+    console.error("VITE_GEMINI_API_KEY is missing from the environment configuration.");
+    return { summary: "Briefing system configuration error." };
+  }
 
   try {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
@@ -45,7 +51,7 @@ export const generateBriefing = async (data: { headlines: string[] }): Promise<{
       return { summary: "Aggregating regional news fields..." };
     }
 
-    const promptText = `You are an elite intelligence editor. Review these headlines and synthesize them into exactly ONE cohesive, fluid narrative paragraph. Your output must be comprehensive and comfortably fit within about 6 to 7 lines of text on a mobile screen (around 90-110 words total). Do not summarize the headlines one by one. Blend them together seamlessly using sharp, professional transitions. Strictly forbidden: bullet points, lists, headers, or bold text formatting. Write exactly one authoritative, beautifully paced paragraph:\n\n${cleanHeadlines.join("\n")}`;
+    const promptText = `You are an elite intelligence editor. Review these headlines and synthesize them into exactly ONE cohesive, fluid narrative paragraph. Your output must be concise and comfortably fit within about 6 to 7 lines of text on a mobile screen (around 90-110 words total). Do not summarize the headlines one by one. Blend them together seamlessly using sharp, professional transitions. Strictly forbidden: bullet points, lists, headers, or bold text formatting. Write exactly one authoritative, beautifully paced paragraph:\n\n${cleanHeadlines.join("\n")}`;
 
     const res = await fetch(url, {
       method: "POST",
@@ -71,53 +77,6 @@ export const generateBriefing = async (data: { headlines: string[] }): Promise<{
   }
 };
 
-/**
- * Preloads summaries for scrolling news batches to make opening cards instantaneous.
- */
 export const fetchPreloadedSummaries = async (items: ApiNewsItem[]): Promise<Record<string, string>> => {
-  if (!items || items.length === 0) return {};
-
-  try {
-    const url = "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/article-summary";
-    
-    // Matched exactly to your live Vercel environment variable setup
-    const SUPABASE_KEY = 
-      (import.meta.env && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) || 
-      (window as any)._env_?.VITE_SUPABASE_PUBLISHABLE_KEY || 
-      "";
-
-    if (!SUPABASE_KEY) {
-      console.error("VITE_SUPABASE_PUBLISHABLE_KEY is missing from execution environment.");
-      return {};
-    }
-
-    const normalizedItems = items.map(item => ({
-      id: item.id,
-      title: item.title || "Untitled",
-      description: item.summary || item.description || "No description available.",
-      url: item.url || "https://worldtimeline.co",
-      author: item.source || item.author || "Global Feed",
-      image: item.image || "",
-      language: item.language || "en",
-      category: Array.isArray(item.category) ? item.category : [item.category || "Top"],
-      published: item.publishedAt || item.published || new Date().toISOString()
-    }));
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${SUPABASE_KEY}`
-      },
-      body: JSON.stringify({ articles: normalizedItems })
-    });
-
-    if (!response.ok) return {};
-
-    const data = await response.json();
-    return data.summaries || {};
-  } catch (e) {
-    console.error("Failed to fetch preloaded summaries:", e);
-    return {};
-  }
+  return {};
 };
