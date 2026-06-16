@@ -1,6 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { useServerFn } from "@tanstack/react-start";
 import { ArrowLeft, Clock, ExternalLink, Loader2 } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
@@ -9,8 +8,6 @@ import { getCachedArticle, type NewsItem } from "@/lib/mock-news";
 import { timeAgo } from "@/lib/format";
 import { useAppState } from "@/hooks/use-app-state";
 import { microLabel, microLabelClass } from "@/lib/micro-label";
-import { generateArticleSummary } from "@/lib/article-summary.functions";
-import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/article/$id")({
   head: () => ({
@@ -58,21 +55,9 @@ export function ArticlePage() {
   const { id } = Route.useParams();
   const { award } = useAppState();
   const [item, setItem] = useState<NewsItem | null>(() => getCachedArticle(id));
-
-  const [lines, setLines] = useState<string[]>(() => {
-    const cachedArray = loadCachedSummary(id);
-    if (cachedArray && cachedArray.length > 0) return cachedArray;
-
-    const cachedArt = getCachedArticle(id);
-    if (cachedArt && cachedArt.summary && cachedArt.summary.length > 200 && !cachedArt.summary.startsWith("Writing a friendly")) {
-      return [cachedArt.summary];
-    }
-    return [];
-  });
-
+  const [lines, setLines] = useState<string[]>(() => loadCachedSummary(id) ?? []);
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
-  const callSummary = useServerFn(generateArticleSummary);
 
   useEffect(() => {
     const freshItem = getCachedArticle(id);
@@ -80,63 +65,51 @@ export function ArticlePage() {
     const cachedArray = loadCachedSummary(id);
     if (cachedArray && cachedArray.length > 0) {
       setLines(cachedArray);
-    } else if (freshItem && freshItem.summary && freshItem.summary.length > 200 && !freshItem.summary.startsWith("Writing a friendly")) {
-      setLines([freshItem.summary]);
     } else {
       setLines([]);
     }
     award("read_summary");
   }, [id]);
 
-  useEffect(() => {
-    if (!item) return;
-
-    const isUselessSnippet = lines.length === 1 && lines[0].length < 200;
-    if (lines.length > 0 && !isUselessSnippet) return;
-
-    let cancelled = false;
+  // DIAGNOSTIC PHASE 1: Raw Fetch Trigger Logic
+  const handleTestClick = async () => {
+    console.log("CORE PROOF BUTTON CLICKED - INITIATING RAW FETCH DISPATCH");
     setLoadingSummary(true);
     setSummaryError(null);
 
-    const payload = {
-      id: item.id,
-      title: item.title,
-      content: item.content,
-      source: item.source,
-      url: item.url,
-    };
-
-    const run = async () => {
-      try {
-        const res = await callSummary({ data: payload });
-        return res.lines.filter(Boolean);
-      } catch {
-        const { data, error } = await supabase.functions.invoke("article-summary", {
-          body: payload,
-        });
-        if (error) throw error;
-        const out = (data as { lines?: string[] })?.lines ?? [];
-        return out.filter(Boolean);
-      }
-    };
-
-    run()
-      .then((out) => {
-        if (cancelled) return;
-        setLines(out);
-        if (out.length) saveCachedSummary(item.id, out);
-      })
-      .catch((e: Error) => {
-        if (!cancelled) setSummaryError(e.message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingSummary(false);
+    try {
+      const res = await fetch("/api/generateArticleSummary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: item?.id,
+          title: item?.title,
+          content: item?.content,
+          source: item?.source,
+          url: item?.url,
+        }),
       });
 
-    return () => {
-      cancelled = true;
-    };
-  }, [item?.id]);
+      console.log("NETWORK RESPONSE STATUS CODE:", res.status);
+      const data = await res.json();
+      console.log("RAW CLIENT-SIDE PAYLOAD RECEIVED:", data);
+
+      if (data && data.lines) {
+        const activeLines = data.lines.filter(Boolean);
+        setLines(activeLines);
+        if (item?.id) saveCachedSummary(item.id, activeLines);
+        alert("SUCCESS: Response parsed by browser context. Verify Vercel logs now.");
+      } else {
+        alert(`HTTP Status ${res.status}: Executed but payload structure lacked array.`);
+      }
+    } catch (err) {
+      console.error("CRITICAL CLIENT DISPATCH FAILURE:", err);
+      setSummaryError(String(err));
+      alert("CRITICAL: Dispatch killed at browser/client layer: " + String(err));
+    } finally {
+      setLoadingSummary(false);
+    }
+  };
 
   if (!item) {
     return (
@@ -160,7 +133,6 @@ export function ArticlePage() {
 
   const hasSource = Boolean(item.url) && item.url !== "#";
   const label = microLabel(item);
-  const fallback = item.summary;
 
   return (
     <div className="min-h-screen bg-background pb-28">
@@ -178,9 +150,6 @@ export function ArticlePage() {
               src={item.image}
               alt={item.title}
               className="aspect-[16/9] w-full object-cover"
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).style.display = "none";
-              }}
             />
           )}
           <div className="space-y-3 px-4 py-4">
@@ -203,11 +172,20 @@ export function ArticlePage() {
               {item.title}
             </h1>
 
+            {/* DIAGNOSTIC TRIGGER INTERFACE */}
+            <button
+              onClick={handleTestClick}
+              type="button"
+              className="w-full bg-red-600 text-white font-bold p-3.5 rounded-md uppercase tracking-wider text-xs my-3 block text-center active:bg-red-700"
+            >
+              💥 Force Send Summary Request
+            </button>
+
             {loadingSummary && lines.length === 0 ? (
               <div className="flex items-center gap-2 rounded-md border border-border bg-background/30 p-3 text-xs text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Writing an executive summary...
               </div>
-            ) : lines.length > 0 && !(lines.length === 1 && lines[0].length < 200) ? (
+            ) : lines.length > 0 ? (
               <div className="space-y-2.5 text-sm leading-relaxed text-foreground/90">
                 {lines.map((p, i) => (
                   <p key={i}>{p}</p>
@@ -219,11 +197,12 @@ export function ArticlePage() {
               </div>
             )}
 
-            {summaryError && !fallback && (
-              <p className="font-mono text-[10px] uppercase tracking-wider text-destructive">
-                Couldn't generate a recap — showing source summary instead.
+            {summaryError && (
+              <p className="font-mono text-[10px] uppercase tracking-wider text-destructive bg-destructive/10 p-3 rounded-md">
+                Runtime Error Trace: {summaryError}
               </p>
             )}
+
             {hasSource && (
               <a
                 href={item.url}
