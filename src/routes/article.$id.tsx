@@ -57,28 +57,50 @@ function saveCachedSummary(id: string, lines: string[]) {
 function ArticlePage() {
   const { id } = Route.useParams();
   const { award } = useAppState();
+  
   const [item, setItem] = useState<NewsItem | null>(() => getCachedArticle(id));
-  const [lines, setLines] = useState<string[]>(() => loadCachedSummary(id) ?? []);
+  
+  // Hydrate from localStorage array OR fall back directly to the preloaded edge summary string
+  const [lines, setLines] = useState<string[]>(() => {
+    const cachedArray = loadCachedSummary(id);
+    if (cachedArray && cachedArray.length > 0) return cachedArray;
+    
+    const cachedArt = getCachedArticle(id);
+    if (cachedArt && cachedArt.summary && !cachedArt.summary.startsWith("Writing a friendly")) {
+      return [cachedArt.summary];
+    }
+    return [];
+  });
+
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const callSummary = useServerFn(generateArticleSummary);
 
   useEffect(() => {
-    setItem(getCachedArticle(id));
-    setLines(loadCachedSummary(id) ?? []);
+    const freshItem = getCachedArticle(id);
+    setItem(freshItem);
+    
+    const cachedArray = loadCachedSummary(id);
+    if (cachedArray && cachedArray.length > 0) {
+      setLines(cachedArray);
+    } else if (freshItem && freshItem.summary && !freshItem.summary.startsWith("Writing a friendly")) {
+      setLines([freshItem.summary]);
+    } else {
+      setLines([]);
+    }
+    
     award("read_summary");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   useEffect(() => {
     if (!item) return;
+    // CRITICAL: If we already have a preloaded summary, DO NOT run the on-demand generation loop
     if (lines.length > 0) return;
 
     let cancelled = false;
     setLoadingSummary(true);
     setSummaryError(null);
 
-    // Updated payload to send the full content field to the function
     const payload = {
       id: item.id,
       title: item.title,
@@ -117,8 +139,7 @@ function ArticlePage() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item?.id]);
+  }, [item?.id, lines.length]);
 
   if (!item) {
     return (
@@ -154,7 +175,6 @@ function ArticlePage() {
         >
           <ArrowLeft className="h-3.5 w-3.5" /> Back to feed
         </Link>
-
         <article className="overflow-hidden rounded-xl border border-border bg-surface-1">
           {item.image && (
             <img
@@ -166,7 +186,6 @@ function ArticlePage() {
               }}
             />
           )}
-
           <div className="space-y-3 px-4 py-4">
             <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
               {label && (
@@ -183,11 +202,10 @@ function ArticlePage() {
                 <Clock className="h-3 w-3" /> {timeAgo(item.publishedAt)}
               </span>
             </div>
-
             <h1 className="text-xl font-semibold leading-tight tracking-tight">
               {item.title}
             </h1>
-
+            
             {loadingSummary && lines.length === 0 ? (
               <div className="flex items-center gap-2 rounded-md border border-border bg-background/30 p-3 text-xs text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Writing a friendly recap of this story…
@@ -202,7 +220,7 @@ function ArticlePage() {
               <p className="text-sm leading-relaxed text-foreground/90">{fallback}</p>
             )}
 
-            {summaryError && (
+            {summaryError && !fallback && (
               <p className="font-mono text-[10px] uppercase tracking-wider text-destructive">
                 Couldn't generate a recap — showing source summary instead.
               </p>
@@ -220,7 +238,6 @@ function ArticlePage() {
               </a>
             )}
           </div>
-
           <ReactionBar item={item} showReadLink={false} defaultCommentsOpen />
         </article>
       </main>
@@ -228,4 +245,3 @@ function ArticlePage() {
     </div>
   );
 }
-
