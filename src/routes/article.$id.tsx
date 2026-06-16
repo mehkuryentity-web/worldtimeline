@@ -62,9 +62,8 @@ export function ArticlePage() {
   const [lines, setLines] = useState<string[]>(() => {
     const cachedArray = loadCachedSummary(id);
     if (cachedArray && cachedArray.length > 0) return cachedArray;
-    
+
     const cachedArt = getCachedArticle(id);
-    // Only pre-fill state if the existing summary is long enough to be an actual premium brief
     if (cachedArt && cachedArt.summary && cachedArt.summary.length > 200 && !cachedArt.summary.startsWith("Writing a friendly")) {
       return [cachedArt.summary];
     }
@@ -91,11 +90,8 @@ export function ArticlePage() {
 
   useEffect(() => {
     if (!item) return;
-    
-    // CRITICAL FIX: Identify if the summary on hand is just a short raw fallback snippet (< 200 chars)
-    const isUselessSnippet = lines.length === 1 && lines[0].length < 200;
 
-    // Only skip generation if we have a real, long premium executive summary stored
+    const isUselessSnippet = lines.length === 1 && lines[0].length < 200;
     if (lines.length > 0 && !isUselessSnippet) return;
 
     let cancelled = false;
@@ -140,7 +136,7 @@ export function ArticlePage() {
     return () => {
       cancelled = true;
     };
-  }, [item?.id, lines.length]);
+  }, [item?.id]);
 
   if (!item) {
     return (
@@ -206,7 +202,7 @@ export function ArticlePage() {
             <h1 className="text-xl font-semibold leading-tight tracking-tight">
               {item.title}
             </h1>
-            
+
             {loadingSummary && lines.length === 0 ? (
               <div className="flex items-center gap-2 rounded-md border border-border bg-background/30 p-3 text-xs text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Writing an executive summary...
