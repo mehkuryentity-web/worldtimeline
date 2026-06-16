@@ -60,52 +60,52 @@ export function ArticlePage() {
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
+  // Automated stable loading block triggered on mount
   useEffect(() => {
     const freshItem = getCachedArticle(id);
     setItem(freshItem);
+    
     const cachedArray = loadCachedSummary(id);
     if (cachedArray && cachedArray.length > 0) {
       setLines(cachedArray);
     } else {
       setLines([]);
+      if (freshItem) {
+        fetchAutomatedSummary(freshItem);
+      }
     }
     award("read_summary");
   }, [id]);
 
-  // PHASE 2: Direct Supabase Edge Function Dispatch
-  const handleTestClick = async () => {
-    console.log("DISPATCHING DIRECTLY TO SUPABASE EDGE FUNCTION");
+  const fetchAutomatedSummary = async (targetItem: NewsItem) => {
     setLoadingSummary(true);
     setSummaryError(null);
 
     try {
       const { data, error } = await supabase.functions.invoke("article-summary", {
         body: {
-          id: item?.id,
-          title: item?.title,
-          content: item?.content,
-          source: item?.source,
-          url: item?.url,
+          id: targetItem.id,
+          title: targetItem.title,
+          content: targetItem.content,
+          source: targetItem.source,
+          url: targetItem.url,
         },
       });
 
       if (error) throw error;
 
-      console.log("SUPABASE RAW RESPONSE:", data);
       const out = (data as { lines?: string[] })?.lines ?? [];
       const activeLines = out.filter(Boolean);
 
       if (activeLines.length > 0) {
         setLines(activeLines);
-        if (item?.id) saveCachedSummary(item.id, activeLines);
-        alert("SUCCESS! Supabase returned your premium executive summary.");
+        saveCachedSummary(targetItem.id, activeLines);
       } else {
-        alert("Connected to Supabase, but returned data lines were empty.");
+        setSummaryError("Premium brief compilation completed but payload array structure was empty.");
       }
     } catch (err) {
-      console.error("SUPABASE CONNECTION CRASHED:", err);
-      setSummaryError(String(err));
-      alert("Backend execution failed: " + String(err));
+      console.error("Automated background summary fetch failed:", err);
+      setSummaryError("Failed to update summary: " + String(err));
     } finally {
       setLoadingSummary(false);
     }
@@ -168,18 +168,10 @@ export function ArticlePage() {
                 <Clock className="h-3 w-3" /> {timeAgo(item.publishedAt)}
               </span>
             </div>
+            
             <h1 className="text-xl font-semibold leading-tight tracking-tight">
               {item.title}
             </h1>
-
-            {/* LIVE SUPABASE TEST TRIGGER */}
-            <button
-              onClick={handleTestClick}
-              type="button"
-              className="w-full bg-red-600 text-white font-bold p-3.5 rounded-md uppercase tracking-wider text-xs my-3 block text-center active:bg-red-700"
-            >
-              💥 Connect Direct To Supabase
-            </button>
 
             {loadingSummary && lines.length === 0 ? (
               <div className="flex items-center gap-2 rounded-md border border-border bg-background/30 p-3 text-xs text-muted-foreground">
@@ -191,16 +183,14 @@ export function ArticlePage() {
                   <p key={i}>{p}</p>
                 ))}
               </div>
+            ) : summaryError ? (
+              <p className="font-mono text-[10px] uppercase tracking-wider text-destructive bg-destructive/10 p-3 rounded-md">
+                {summaryError}
+              </p>
             ) : (
               <div className="flex items-center gap-2 rounded-md border border-border bg-background/30 p-3 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Updating brief to premium tier...
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Preparing system update...
               </div>
-            )}
-
-            {summaryError && (
-              <p className="font-mono text-[10px] uppercase tracking-wider text-destructive bg-destructive/10 p-3 rounded-md">
-                Server Response Trace: {summaryError}
-              </p>
             )}
 
             {hasSource && (
