@@ -35,12 +35,10 @@ export const generateBriefing = async (data: { headlines: string[] }): Promise<{
     return { summary: "Synthesizing live breaking news channels..." };
   }
 
-  // Securely reads the key you just added to your Vercel Dashboard
   const GEMINI_API_KEY = (import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) || "";
 
   if (!GEMINI_API_KEY) {
-    console.error("VITE_GEMINI_API_KEY is missing from the environment configuration.");
-    return { summary: "Briefing system configuration error." };
+    return { summary: "Briefing system environment token configuration error." };
   }
 
   try {
@@ -61,12 +59,12 @@ export const generateBriefing = async (data: { headlines: string[] }): Promise<{
       }),
     });
 
-    if (!res.ok) throw new Error(`Gemini API returned status ${res.status}`);
+    if (!res.ok) throw new Error(`Gemini API error status: ${res.status}`);
 
     const json = await res.json();
     const summary = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
     
-    if (!summary) throw new Error("Empty text block from Gemini");
+    if (!summary) throw new Error("Empty text chunk received from Gemini endpoint");
     return { summary };
   } catch (e) {
     console.error("Briefing generation failed:", e);
@@ -77,6 +75,52 @@ export const generateBriefing = async (data: { headlines: string[] }): Promise<{
   }
 };
 
+/**
+ * Preloads summaries in batches via Supabase Edge Function using your validated publishable key.
+ */
 export const fetchPreloadedSummaries = async (items: ApiNewsItem[]): Promise<Record<string, string>> => {
-  return {};
+  if (!items || items.length === 0) return {};
+
+  try {
+    const url = "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/article-summary";
+    
+    const SUPABASE_KEY = 
+      (import.meta.env && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) || 
+      (window as any)._env_?.VITE_SUPABASE_PUBLISHABLE_KEY || 
+      "";
+
+    if (!SUPABASE_KEY) {
+      console.error("VITE_SUPABASE_PUBLISHABLE_KEY environment reference is unavailable.");
+      return {};
+    }
+
+    const normalizedItems = items.map(item => ({
+      id: item.id,
+      title: item.title || "Untitled",
+      description: item.summary || item.description || "No description available.",
+      url: item.url || "https://worldtimeline.co",
+      author: item.source || item.author || "Global Feed",
+      image: item.image || "",
+      language: item.language || "en",
+      category: Array.isArray(item.category) ? item.category : [item.category || "Top"],
+      published: item.publishedAt || item.published || new Date().toISOString()
+    }));
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${SUPABASE_KEY}`
+      },
+      body: JSON.stringify({ articles: normalizedItems })
+    });
+
+    if (!response.ok) return {};
+
+    const data = await response.json();
+    return data.summaries || {};
+  } catch (e) {
+    console.error("Failed to fetch preloaded summaries:", e);
+    return {};
+  }
 };
