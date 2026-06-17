@@ -19,6 +19,13 @@ export const Route = createFileRoute("/")({
   component: Home,
 });
 
+const normalizeCategory = (cat: string): Category => {
+  const found = CATEGORIES.find(
+    (c) => c.toLowerCase() === cat.toLowerCase()
+  );
+  return found ?? "Top";
+};
+
 async function fetchNews(category: Category, country: string) {
   const res = await fetch(
     `/api/news?category=${encodeURIComponent(category)}&country=${encodeURIComponent(country)}`
@@ -55,7 +62,7 @@ function Home() {
 
   const apiItems: NewsItem[] = (data?.items ?? []).map((n: any) => ({
     id: n.id,
-    category: CATEGORIES.includes(n.category) ? n.category : "Top",
+    category: normalizeCategory(n.category),
     title: n.title,
     source: n.source,
     region: n.region,
@@ -69,7 +76,7 @@ function Home() {
     .filter((p) => category === "Top" || p.category === category)
     .map((p) => ({
       id: p.id,
-      category: CATEGORIES.includes(p.category) ? p.category : "Top",
+      category: normalizeCategory(p.category),
       title: p.title,
       source: "Community",
       region: p.region || "Community",
@@ -93,9 +100,7 @@ function Home() {
     if (allItems.length) cacheArticles(allItems);
   }, [data?.fetchedAt, state.userPosts.length]);
 
-  /**
-   * 🚀 BACKGROUND PRELOADER (REAL CACHE SYNC)
-   */
+  // PRELOAD SUMMARIES (FIXED)
   useEffect(() => {
     if (!items.length) return;
 
@@ -136,12 +141,9 @@ function Home() {
       .catch(() => {});
   }, [items]);
 
-  /**
-   * ⚡ BACKGROUND AI BRIEFING PRELOAD
-   */
+  // AI BRIEFING PRELOAD
   useEffect(() => {
     if (!items.length) return;
-
     warmAIHomeBriefing(items.slice(0, 6).map((i) => i.title)).catch(() => {});
   }, [items]);
 
@@ -156,9 +158,34 @@ function Home() {
 
         <div className="flex items-center justify-between gap-2">
           <CountrySelector value={country} onChange={setCountry} />
+
+          <div className="flex items-center gap-2">
+            <Timer className="h-3 w-3" />
+            <select
+              value={refreshMs}
+              onChange={(e) => setRefreshMs(Number(e.target.value))}
+              className="text-xs border rounded px-2 py-1"
+            >
+              <option value={300000}>5 min</option>
+              <option value={600000}>10 min</option>
+              <option value={1800000}>30 min</option>
+              <option value={3600000}>1 hour</option>
+              <option value={0}>Off</option>
+            </select>
+          </div>
         </div>
 
         <CategoryTabs value={category} onChange={setCategory} />
+
+        <h2 className="text-[10px] uppercase text-muted-foreground">
+          {countryMeta.flag} {countryMeta.name} · {category}
+        </h2>
+
+        {isLoading && items.length === 0 && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" /> Loading feed...
+          </div>
+        )}
 
         <div className="space-y-3">
           {items.map((item) => (
