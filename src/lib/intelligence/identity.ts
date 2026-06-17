@@ -1,25 +1,53 @@
-const KEY = "wt:ai-identity:v1";
+const IDENTITY_KEY = "wt:brief_identity:v1";
 
-const ADJECTIVES = [
-  "Atlas Reader",
-  "Nova Witness",
-  "Signal Drifter",
-  "Chronicle Hunter",
-  "Feed Wanderer",
-  "Orbit Listener",
+const FUN_NAMES = [
+  "StoryRaven",
+  "GossipNomad",
+  "ChronicleFox",
+  "NewsWhisper",
+  "PlotHopper",
+  "RumorSage",
+  "ScrollJester",
+  "TaleDrifter",
+  "IntelPanda",
+  "BriefingBandit",
+  "LoreSeeker",
+  "BuzzAlchemist",
 ];
 
-function pick() {
-  return ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
+function pickRandom(arr: string[]) {
+  return arr[Math.floor(Math.random() * arr.length)];
 }
 
-export function getAIIdentity(username?: string | null) {
-  if (typeof window === "undefined") return "Reader";
+function sanitize(name: string) {
+  return name
+    .replace(/[^a-zA-Z0-9 ]/g, "")
+    .split(" ")[0]
+    .slice(0, 18);
+}
 
-  const stored = localStorage.getItem(KEY);
-  if (stored) return stored;
+/**
+ * SINGLE SOURCE OF TRUTH FOR BRIEF IDENTITY
+ */
+export function getBriefIdentity(userName?: string | null) {
+  if (typeof window === "undefined") return "NewsSeeker";
 
-  const value = username ? username : pick();
-  localStorage.setItem(KEY, value);
-  return value;
+  try {
+    const existing = localStorage.getItem(IDENTITY_KEY);
+    if (existing) return existing;
+
+    const name = userName?.trim()
+      ? sanitize(userName)
+      : pickRandom(FUN_NAMES);
+
+    localStorage.setItem(IDENTITY_KEY, name);
+    return name;
+  } catch {
+    return userName || "NewsSeeker";
+  }
+}
+
+export function resetBriefIdentity() {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(IDENTITY_KEY);
 }
