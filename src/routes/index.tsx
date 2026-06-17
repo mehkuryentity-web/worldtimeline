@@ -13,20 +13,17 @@ import { findCountry } from "@/lib/countries";
 import { useAppState } from "@/hooks/use-app-state";
 import { Loader2, Timer } from "lucide-react";
 import { fetchPreloadedSummaries } from "@/lib/news.functions";
+import { warmAIHomeBriefing } from "@/lib/aiBriefing.engine";
 
 export const Route = createFileRoute("/")({
   component: Home,
 });
 
-const SUMMARY_CACHE_KEY = "wt:ai-summary:v1";
-
-function saveToGlobalCache(id: string, summary: string) {
-  try {
-    const raw = localStorage.getItem(SUMMARY_CACHE_KEY);
-    const map = raw ? JSON.parse(raw) : {};
-    map[id] = [summary];
-    localStorage.setItem(SUMMARY_CACHE_KEY, JSON.stringify(map));
-  } catch {}
+async function fetchNews(category: Category, country: string) {
+  const res = await fetch(
+    `/api/news?category=${encodeURIComponent(category)}&country=${encodeURIComponent(country)}`
+  );
+  return res.json();
 }
 
 function Home() {
@@ -47,27 +44,11 @@ function Home() {
 
   useEffect(() => {
     award("open_app");
-
-    if (!state.country) {
-      fetch("/api/geo")
-        .then((r) => r.json())
-        .then((d: { country: string | null }) => {
-          if (d.country && findCountry(d.country).code === d.country) {
-            setCountry(d.country);
-          }
-        })
-        .catch(() => {});
-    }
   }, []);
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ["news", country, category],
-    queryFn: async () => {
-      const res = await fetch(
-        `/api/news?category=${encodeURIComponent(category)}&country=${encodeURIComponent(country)}`
-      );
-      return res.json();
-    },
+    queryFn: () => fetchNews(category, country),
     refetchInterval: refreshMs > 0 ? refreshMs : false,
     staleTime: 5 * 60 * 1000,
   });
@@ -112,7 +93,9 @@ function Home() {
     if (allItems.length) cacheArticles(allItems);
   }, [data?.fetchedAt, state.userPosts.length]);
 
-  // 🚀 FIXED PRELOADER: now persists to localStorage (REAL preload)
+  /**
+   * 🚀 BACKGROUND PRELOADER (REAL CACHE SYNC)
+   */
   useEffect(() => {
     if (!items.length) return;
 
@@ -138,11 +121,28 @@ function Home() {
       .then((res) => {
         if (!res) return;
 
-        Object.entries(res).forEach(([id, summary]) => {
-          saveToGlobalCache(id, summary as string);
-        });
+        try {
+          const CACHE_KEY = "wt:ai-summary:v1";
+          const existing = localStorage.getItem(CACHE_KEY);
+          const map = existing ? JSON.parse(existing) : {};
+
+          Object.entries(res).forEach(([id, summary]) => {
+            map[id] = summary;
+          });
+
+          localStorage.setItem(CACHE_KEY, JSON.stringify(map));
+        } catch {}
       })
       .catch(() => {});
+  }, [items]);
+
+  /**
+   * ⚡ BACKGROUND AI BRIEFING PRELOAD
+   */
+  useEffect(() => {
+    if (!items.length) return;
+
+    warmAIHomeBriefing(items.slice(0, 6).map((i) => i.title)).catch(() => {});
   }, [items]);
 
   return (
