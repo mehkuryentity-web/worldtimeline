@@ -18,12 +18,6 @@ export const Route = createFileRoute("/article/$id")({
     ],
   }),
   component: ArticlePage,
-  errorComponent: ({ error }) => (
-    <div className="p-6 text-sm text-destructive">{error.message}</div>
-  ),
-  notFoundComponent: () => (
-    <div className="p-6 text-sm text-muted-foreground">Article not found.</div>
-  ),
 });
 
 const SUMMARY_CACHE_KEY = "wt:ai-summary:v1";
@@ -47,14 +41,13 @@ function saveCachedSummary(id: string, lines: string[]) {
     const map = raw ? (JSON.parse(raw) as Record<string, string[]>) : {};
     map[id] = lines;
     localStorage.setItem(SUMMARY_CACHE_KEY, JSON.stringify(map));
-  } catch {
-    /* ignore */
-  }
+  } catch {}
 }
 
 export function ArticlePage() {
   const { id } = Route.useParams();
   const { award } = useAppState();
+
   const [item, setItem] = useState<NewsItem | null>(() => getCachedArticle(id));
   const [lines, setLines] = useState<string[]>(() => loadCachedSummary(id) ?? []);
   const [loadingSummary, setLoadingSummary] = useState(false);
@@ -63,48 +56,61 @@ export function ArticlePage() {
   useEffect(() => {
     const freshItem = getCachedArticle(id);
     setItem(freshItem);
-    
-    const cachedArray = loadCachedSummary(id);
-    if (cachedArray && cachedArray.length > 0) {
-      setLines(cachedArray);
-    } else {
-      setLines([]);
-      if (freshItem) {
-        fetchAutomatedSummary(freshItem);
-      }
+
+    const cached = loadCachedSummary(id);
+
+    if (cached?.length) {
+      setLines(cached);
+      return;
     }
+
+    if (freshItem) {
+      fetchSummary(freshItem);
+    }
+
     award("read_summary");
   }, [id]);
 
-  const fetchAutomatedSummary = async (targetItem: NewsItem) => {
+  const fetchSummary = async (targetItem: NewsItem) => {
     setLoadingSummary(true);
     setSummaryError(null);
 
+    let timeout: any;
+
     try {
-      const { data, error } = await supabase.functions.invoke("article-summary", {
-        body: {
-          id: targetItem.id,
-          title: targetItem.title,
-          content: targetItem.summary, // Maps to the correct '.summary' field from mock-news.ts
-          source: targetItem.source,
-          url: targetItem.url,
-        },
-      });
+      timeout = setTimeout(() => {
+        setLoadingSummary(false);
+        setSummaryError("Summary request timed out.");
+      }, 12000);
+
+      const { data, error } = await supabase.functions.invoke(
+        "article-summary",
+        {
+          body: {
+            id: targetItem.id,
+            title: targetItem.title,
+            content: targetItem.summary,
+            source: targetItem.source,
+            url: targetItem.url,
+          },
+        }
+      );
+
+      clearTimeout(timeout);
 
       if (error) throw error;
 
-      const out = (data as { lines?: string[] })?.lines ?? [];
-      const activeLines = out.filter(Boolean);
+      const text = data?.lines?.[0];
 
-      if (activeLines.length > 0) {
-        setLines(activeLines);
-        saveCachedSummary(targetItem.id, activeLines);
+      if (text) {
+        setLines([text]);
+        saveCachedSummary(targetItem.id, [text]);
       } else {
-        setSummaryError("Premium brief compilation completed but payload array structure was empty.");
+        setSummaryError("Empty summary returned.");
       }
     } catch (err) {
-      console.error("Automated background summary fetch failed:", err);
-      setSummaryError("Failed to update summary: " + String(err));
+      clearTimeout(timeout);
+      setSummaryError("Failed to generate summary.");
     } finally {
       setLoadingSummary(false);
     }
@@ -115,14 +121,12 @@ export function ArticlePage() {
       <div className="min-h-screen bg-background pb-28">
         <TopBar />
         <main className="mx-auto max-w-md px-4 pt-6">
-          <Link
-            to="/"
-            className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" /> Back to feed
+          <Link to="/" className="text-xs uppercase">
+            <ArrowLeft className="h-3 w-3 inline" /> Back
           </Link>
-          <div className="mt-6 rounded-xl border border-border bg-surface-1 p-6 text-center font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-            We couldn't find this story in the local cache. Open it at the source instead.
+
+          <div className="mt-6 text-xs text-muted-foreground">
+            Article not found.
           </div>
         </main>
         <BottomNav />
@@ -136,14 +140,13 @@ export function ArticlePage() {
   return (
     <div className="min-h-screen bg-background pb-28">
       <TopBar />
+
       <main className="mx-auto max-w-md space-y-4 px-4 pt-4">
-        <Link
-          to="/"
-          className="inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" /> Back to feed
+        <Link to="/" className="text-xs uppercase">
+          <ArrowLeft className="h-3 w-3 inline" /> Back
         </Link>
-        <article className="overflow-hidden rounded-xl border border-border bg-surface-1">
+
+        <article className="rounded-xl border border-border bg-surface-1">
           {item.image && (
             <img
               src={item.image}
@@ -151,44 +154,34 @@ export function ArticlePage() {
               className="aspect-[16/9] w-full object-cover"
             />
           )}
-          <div className="space-y-3 px-4 py-4">
-            <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-              {label && (
-                <span className={`rounded-sm px-1.5 py-0.5 font-bold ${microLabelClass(label)}`}>
-                  {label}
-                </span>
-              )}
+
+          <div className="p-4 space-y-3">
+            <div className="flex text-[10px] uppercase gap-2 text-muted-foreground">
               <span className="text-primary">{item.category}</span>
-              <span>·</span>
               <span>{item.source}</span>
-              <span>·</span>
               <span>{item.region}</span>
               <span className="ml-auto flex items-center gap-1">
                 <Clock className="h-3 w-3" /> {timeAgo(item.publishedAt)}
               </span>
             </div>
-            
-            <h1 className="text-xl font-semibold leading-tight tracking-tight">
-              {item.title}
-            </h1>
 
-            {loadingSummary && lines.length === 0 ? (
-              <div className="flex items-center gap-2 rounded-md border border-border bg-background/30 p-3 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Writing an executive summary...
-              </div>
-            ) : lines.length > 0 ? (
-              <div className="space-y-2.5 text-sm leading-relaxed text-foreground/90">
-                {lines.map((p, i) => (
-                  <p key={i}>{p}</p>
-                ))}
+            <h1 className="text-xl font-semibold">{item.title}</h1>
+
+            {/* SUMMARY UI */}
+            {lines.length > 0 ? (
+              <p className="text-sm leading-relaxed text-foreground/90">
+                {lines[0]}
+              </p>
+            ) : loadingSummary ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Generating summary...
               </div>
             ) : summaryError ? (
-              <div className="font-mono text-[10px] uppercase tracking-wider text-destructive bg-destructive/10 p-3 rounded-md">
-                {summaryError}
-              </div>
+              <div className="text-xs text-red-400">{summaryError}</div>
             ) : (
-              <div className="flex items-center gap-2 rounded-md border border-border bg-background/30 p-3 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Preparing premium summary...
+              <div className="text-xs text-muted-foreground">
+                Preparing article...
               </div>
             )}
 
@@ -196,17 +189,17 @@ export function ArticlePage() {
               <a
                 href={item.url}
                 target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => award("read_article")}
-                className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 font-mono text-[11px] uppercase tracking-wider text-primary-foreground"
+                className="inline-flex items-center gap-1 text-xs uppercase bg-primary text-white px-3 py-2 rounded"
               >
-                Read full article at source <ExternalLink className="h-3.5 w-3.5" />
+                Read Source <ExternalLink className="h-3 w-3" />
               </a>
             )}
           </div>
-          <ReactionBar item={item} showReadLink={false} defaultCommentsOpen />
+
+          <ReactionBar item={item} showReadLink={false} />
         </article>
       </main>
+
       <BottomNav />
     </div>
   );
