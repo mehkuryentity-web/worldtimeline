@@ -4,70 +4,158 @@ import { getBriefIdentity } from "./identity";
 export interface BriefingInput {
   headlines: string[];
   userName?: string | null;
+  country?: string;
 }
 
-/**
- * Pulls cached AI summaries and builds a ranked briefing
- * Priority:
- * 1. Cached AI summaries (article-level intelligence)
- * 2. Fallback to raw headlines
- */
-function extractTopSummaries(limit = 5): string[] {
+/* -----------------------------
+   SIGNAL CLASSIFICATION LAYER
+------------------------------*/
+
+function classify(headline: string): string {
+  const h = headline.toLowerCase();
+
+  if (h.includes("market") || h.includes("economy") || h.includes("oil") || h.includes("bank"))
+    return "Economic & Market Signals";
+
+  if (h.includes("election") || h.includes("government") || h.includes("policy") || h.includes("senate"))
+    return "Governance & Political Movement";
+
+  if (h.includes("tech") || h.includes("ai") || h.includes("apple") || h.includes("software"))
+    return "Technology Acceleration";
+
+  if (h.includes("climate") || h.includes("weather") || h.includes("cop"))
+    return "Climate & Environment";
+
+  if (h.includes("war") || h.includes("ceasefire") || h.includes("security"))
+    return "Security & Geopolitical Tension";
+
+  return "General Developments";
+}
+
+/* -----------------------------
+   CACHE EXTRACTION
+------------------------------*/
+
+function extractCachedSummaries(limit = 5): string[] {
   const cache = loadSummaryCache?.() || {};
 
   const collected: string[] = [];
 
   for (const key of Object.keys(cache)) {
     const lines = cache[key];
-    if (Array.isArray(lines)) {
-      collected.push(...lines);
-    }
+    if (Array.isArray(lines)) collected.push(...lines);
     if (collected.length >= limit) break;
   }
 
   return collected.slice(0, limit);
 }
 
-/**
- * Fallback if cache is empty
- */
-function fallback(headlines: string[]): string[] {
-  return [
-    `${headlines[0] ?? "Global markets"} are shaping today’s opening narrative.`,
-    `${headlines[1] ?? "Political signals"} are shifting across key regions.`,
-    `${headlines[2] ?? "Tech developments"} continue to accelerate quietly.`,
-    `${headlines[3] ?? "Global events"} remain fluid and interconnected.`,
-    `${headlines[4] ?? "Breaking stories"} are still unfolding in real time.`,
-  ];
+/* -----------------------------
+   GROUP BY SIGNAL
+------------------------------*/
+
+function cluster(headlines: string[]) {
+  const map: Record<string, string[]> = {};
+
+  for (const h of headlines) {
+    const key = classify(h);
+    if (!map[key]) map[key] = [];
+    map[key].push(h);
+  }
+
+  return map;
 }
 
-/**
- * Creates dynamic opening line
- */
-function buildOpening(identity: string): string {
+/* -----------------------------
+   FALLBACK MODE (SAFE MODE)
+------------------------------*/
+
+function fallback(headlines: string[]) {
+  return headlines.slice(0, 5).map((h) => `${h} is developing within today’s global cycle.`);
+}
+
+/* -----------------------------
+   COUNTRY CONTEXT BUILDER
+------------------------------*/
+
+function buildCountryContext(country?: string) {
+  if (!country || country === "GLOBAL") {
+    return "This briefing reflects global developments across multiple regions.";
+  }
+
+  return `This briefing is contextualised for ${country}, highlighting local developments alongside global signals.`;
+}
+
+/* -----------------------------
+   OPENING LINE
+------------------------------*/
+
+function buildOpening(identity: string) {
   const openings = [
-    `Today’s news begins with movements that are reshaping the global rhythm.`,
-    `Today’s news opens like a thread pulling multiple stories into focus.`,
-    `Today’s news starts where attention meets acceleration.`,
-    `Today’s news unfolds across signals, tension, and momentum.`,
-    `Today’s news begins with developments you’ll want to track closely.`,
+    `Today’s news moves through intersecting global forces and local shifts.`,
+    `Today’s briefing tracks momentum across politics, markets, and society.`,
+    `Today’s developments form a layered pattern of change and reaction.`,
+    `Today’s news reveals multiple pressure points shaping current events.`,
   ];
 
   return `Hi ${identity}, ${openings[Math.floor(Math.random() * openings.length)]}`;
 }
 
-/**
- * MAIN EXPORT — SINGLE BRIEFING GENERATOR
- */
+/* -----------------------------
+   CONCLUSION ENGINE (CRITICAL)
+------------------------------*/
+
+function buildConclusion(headlines: string[], country?: string) {
+  const h = headlines.join(" ").toLowerCase();
+
+  let tone = "stable but evolving";
+
+  if (h.includes("crisis") || h.includes("war") || h.includes("conflict"))
+    tone = "marked by rising geopolitical tension";
+
+  if (h.includes("market") || h.includes("economy"))
+    tone = "driven by economic adjustment and financial repositioning";
+
+  if (h.includes("tech") || h.includes("ai"))
+    tone = "shaped by rapid technological acceleration";
+
+  if (country && country !== "GLOBAL") {
+    return `Overall, ${country} is experiencing a news cycle that is ${tone}, while remaining tightly connected to broader global developments.`;
+  }
+
+  return `Overall, today’s global news cycle is ${tone}, with interconnected developments across regions reinforcing each other.`;
+}
+
+/* -----------------------------
+   MAIN ENGINE
+------------------------------*/
+
 export function buildBriefing(input: BriefingInput) {
   const identity = getBriefIdentity(input.userName);
 
-  const top = extractTopSummaries(5);
-  const lines = top.length > 0 ? top : fallback(input.headlines);
+  const cached = extractCachedSummaries(5);
+  const source = cached.length > 0 ? cached : fallback(input.headlines);
+
+  const clusters = cluster(input.headlines);
+
+  const countryContext = buildCountryContext(input.country);
+
+  const opening = buildOpening(identity);
+
+  const sections: string[] = [];
+
+  // build clustered narrative
+  for (const [key, items] of Object.entries(clusters)) {
+    const summary = items.slice(0, 2).join(" • ");
+    sections.push(`${key}: ${summary}`);
+  }
 
   return {
     identity,
-    opening: buildOpening(identity),
-    lines: lines.slice(0, 5),
+    opening,
+    countryContext,
+    sections: sections.slice(0, 4),
+    lines: source.slice(0, 5),
+    conclusion: buildConclusion(input.headlines, input.country),
   };
 }
