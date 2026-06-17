@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
+
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
 import { AISummaryCard } from "@/components/AISummaryCard";
@@ -8,16 +9,52 @@ import { CategoryTabs } from "@/components/CategoryTabs";
 import { CountrySelector } from "@/components/CountrySelector";
 import { NewsCard } from "@/components/NewsCard";
 import { Ticker } from "@/components/Ticker";
-import { CATEGORIES, type Category, type NewsItem, cacheArticles } from "@/lib/mock-news";
+
+import {
+  CATEGORIES,
+  type Category,
+  type NewsItem,
+  cacheArticles,
+} from "@/lib/mock-news";
+
 import { findCountry } from "@/lib/countries";
 import { useAppState } from "@/hooks/use-app-state";
 import { Loader2, Timer } from "lucide-react";
+
 import { fetchPreloadedSummaries } from "@/lib/news.functions";
-import { warmAIHomeBriefing } from "@/lib/aiBriefing.engine";
+import { enqueueArticles } from "@/lib/intelligence/preloadEngine";
 
 export const Route = createFileRoute("/")({
   component: Home,
 });
+
+interface ApiNewsItem {
+  id: string;
+  category: string;
+  title: string;
+  source: string;
+  region: string;
+  publishedAt: string;
+  summary: string;
+  url: string;
+  image?: string;
+}
+
+interface NewsResponse {
+  items: ApiNewsItem[];
+  cached: boolean;
+  fetchedAt: string;
+  country: string;
+  category: string;
+  error?: string;
+}
+
+async function fetchNews(category: Category, country: string): Promise<NewsResponse> {
+  const res = await fetch(
+    `/api/news?category=${encodeURIComponent(category)}&country=${encodeURIComponent(country)}`
+  );
+  return res.json();
+}
 
 const normalizeCategory = (cat: string): Category => {
   const found = CATEGORIES.find(
@@ -26,18 +63,15 @@ const normalizeCategory = (cat: string): Category => {
   return found ?? "Top";
 };
 
-async function fetchNews(category: Category, country: string) {
-  const res = await fetch(
-    `/api/news?category=${encodeURIComponent(category)}&country=${encodeURIComponent(country)}`
-  );
-  return res.json();
-}
-
 function Home() {
   const [category, setCategory] = useState<Category>("Top");
+
   const { state, award, update } = useAppState();
 
-  const [country, setCountryState] = useState<string>(() => state.country ?? "GLOBAL");
+  const [country, setCountryState] = useState<string>(
+    () => state.country ?? "GLOBAL"
+  );
+
   const [refreshMs, setRefreshMs] = useState<number>(5 * 60 * 1000);
 
   const preloadedBatchesRef = useRef<Set<string>>(new Set());
@@ -60,7 +94,7 @@ function Home() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const apiItems: NewsItem[] = (data?.items ?? []).map((n: any) => ({
+  const apiItems: NewsItem[] = (data?.items ?? []).map((n) => ({
     id: n.id,
     category: normalizeCategory(n.category),
     title: n.title,
@@ -91,60 +125,69 @@ function Home() {
   );
 
   const now = Date.now();
+
   const items =
     refreshMs > 0
-      ? allItems.filter((i) => now - +new Date(i.publishedAt) <= refreshMs)
+      ? allItems.filter(
+          (i) => now - +new Date(i.publishedAt) <= refreshMs
+        )
       : allItems;
 
   useEffect(() => {
-    if (allItems.length) cacheArticles(allItems);
+    if (allItems.length) {
+      cacheArticles(allItems);
+    }
   }, [data?.fetchedAt, state.userPosts.length]);
 
-  // PRELOAD SUMMARIES (FIXED)
+  /*
+   * =========================================================
+   * STEP 5 FIX: BACKGROUND PRELOAD TRIGGER (CORE FIX)
+   * =========================================================
+   */
   useEffect(() => {
     if (!items.length) return;
 
-    const batch = items.slice(0, 10);
+    // 1. PRELOAD EDGE SUMMARIES (BATCHED)
+    const batch = items.slice(0, 12);
     const batchKey = batch.map((b) => b.id).join(",");
 
-    if (preloadedBatchesRef.current.has(batchKey)) return;
-    preloadedBatchesRef.current.add(batchKey);
+    if (!preloadedBatchesRef.current.has(batchKey)) {
+      preloadedBatchesRef.current.add(batchKey);
 
-    const formatted = batch.map((item) => ({
-      id: item.id,
-      title: item.title,
-      description: item.summary,
-      url: item.url,
-      author: item.source,
-      image: item.image,
-      language: "en",
-      category: [item.category],
-      published: item.publishedAt,
-    }));
+      const formatted = batch.map((item) => ({
+        id: item.id,
+        title: item.title,
+        description: item.summary ?? "",
+        url: item.url ?? "",
+        author: item.source ?? "",
+        image: item.image ?? "",
+        language: "en",
+        category: [item.category],
+        published: item.publishedAt,
+      }));
 
-    fetchPreloadedSummaries(formatted)
-      .then((res) => {
-        if (!res) return;
+      fetchPreloadedSummaries(formatted)
+        .then((res) => {
+          if (!res) return;
 
-        try {
-          const CACHE_KEY = "wt:ai-summary:v1";
-          const existing = localStorage.getItem(CACHE_KEY);
-          const map = existing ? JSON.parse(existing) : {};
+          const CACHE_KEY = "wt:ai-summary:v2";
 
-          Object.entries(res).forEach(([id, summary]) => {
-            map[id] = summary;
-          });
+          try {
+            const existing = localStorage.getItem(CACHE_KEY);
+            const map = existing ? JSON.parse(existing) : {};
 
-          localStorage.setItem(CACHE_KEY, JSON.stringify(map));
-        } catch {}
-      })
-      .catch(() => {});
-  }, [items]);
+            Object.entries(res).forEach(([id, value]) => {
+              map[id] = value;
+            });
 
-  // AI BRIEFING PRELOAD
-  useEffect(() => {
-    if (!items.length) return;
-    warmAIHomeBriefing(items.slice(0, 6).map((i) => i.title)).catch(() => {});
+            localStorage.setItem(CACHE_KEY, JSON.stringify(map));
+          } catch {}
+        })
+        .catch(() => {});
+    }
+
+    // 2. PRELOAD INTELLIGENCE ENGINE (NEW V2 LAYER)
+    enqueueArticles(items.slice(0, 12));
   }, [items]);
 
   return (
@@ -183,7 +226,14 @@ function Home() {
 
         {isLoading && items.length === 0 && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader2 className="h-3 w-3 animate-spin" /> Loading feed...
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Loading feed...
+          </div>
+        )}
+
+        {(error as any) && (
+          <div className="text-xs text-red-500">
+            Failed to load news
           </div>
         )}
 
