@@ -1,95 +1,76 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { buildBriefing } from "@/lib/intelligence/briefing";
 import { useAppState } from "@/hooks/use-app-state";
 
 interface Props {
   headlines: string[];
+  country?: string;
 }
 
-export function AISummaryCard({ headlines }: Props) {
+export function AISummaryCard({ headlines, country }: Props) {
   const { state } = useAppState();
 
-  const [opening, setOpening] = useState("");
-  const [lines, setLines] = useState<string[]>([]);
-  const [identity, setIdentity] = useState("");
-  const [countryContext, setCountryContext] = useState("");
-  const [conclusion, setConclusion] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [time, setTime] = useState(new Date());
 
-  const generate = () => {
-    setLoading(true);
+  const userName = state?.user?.name ?? null;
 
-    // hard reset so refresh ALWAYS works
-    setOpening("");
-    setLines([]);
-    setIdentity("");
-    setCountryContext("");
-    setConclusion("");
-
-    const result = buildBriefing({
+  const briefing = useMemo(() => {
+    return buildBriefing({
       headlines,
-      userName: state?.user?.name ?? null,
-      country: state?.country ?? "GLOBAL",
+      userName,
+      country,
+      refreshKey,
     });
-
-    setOpening(result.opening);
-    setLines(result.lines);
-    setIdentity(result.identity);
-    setCountryContext(result.countryContext);
-    setConclusion(result.conclusion);
-
-    setLoading(false);
-    setTime(new Date());
-  };
+  }, [headlines, userName, country, refreshKey]);
 
   useEffect(() => {
-    generate();
-  }, [headlines, state?.user?.name, state?.country]);
+    setLoading(true);
+
+    const t = setTimeout(() => {
+      setData(briefing);
+      setLoading(false);
+    }, 200);
+
+    return () => clearTimeout(t);
+  }, [briefing]);
 
   return (
     <div className="rounded-xl border border-border bg-surface-1 p-4 space-y-3">
-      {/* HEADER */}
+      {/* HEADER + REFRESH */}
       <div className="flex items-center justify-between">
         <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-          AI Briefing · {time.toLocaleTimeString().slice(0, 5)}
+          AI Briefing · {new Date().toLocaleTimeString().slice(0, 5)}
         </div>
 
         <button
-          onClick={generate}
-          className="text-muted-foreground hover:text-foreground transition"
+          onClick={() => setRefreshKey((k) => k + 1)}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
         >
-          <RefreshCw className="h-4 w-4" />
+          <RefreshCw className="h-3 w-3" />
         </button>
       </div>
 
-      {/* BODY */}
-      {loading ? (
+      {loading || !data ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin" />
           Composing briefing...
         </div>
       ) : (
         <div className="space-y-3 text-sm leading-relaxed text-foreground/90">
-          <p className="font-medium">{opening}</p>
+          <p className="font-medium">{data.opening}</p>
 
-          <p className="text-muted-foreground">{countryContext}</p>
-
-          {lines.map((line, i) => (
-            <p key={i}>{line}</p>
+          {data.stories.map((s: string, i: number) => (
+            <p key={i}>{s}</p>
           ))}
 
-          <p className="font-medium border-t border-border pt-3">
-            {conclusion}
+          <p className="font-medium pt-2 border-t border-border">
+            {data.conclusion}
           </p>
         </div>
       )}
-
-      {/* IDENTITY */}
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-        Narrator: {identity}
-      </div>
     </div>
   );
 }
