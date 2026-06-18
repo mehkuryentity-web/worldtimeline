@@ -19,7 +19,7 @@ import {
 
 import { findCountry } from "@/lib/countries";
 import { useAppState } from "@/hooks/use-app-state";
-import { Loader2, Timer } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 import { fetchPreloadedSummaries } from "@/lib/news.functions";
 import { enqueueArticles } from "@/lib/intelligence/preloadEngine";
@@ -40,16 +40,7 @@ interface ApiNewsItem {
   image?: string;
 }
 
-interface NewsResponse {
-  items: ApiNewsItem[];
-  cached: boolean;
-  fetchedAt: string;
-  country: string;
-  category: string;
-  error?: string;
-}
-
-async function fetchNews(category: Category, country: string): Promise<NewsResponse> {
+async function fetchNews(category: Category, country: string) {
   const res = await fetch(
     `/api/news?category=${encodeURIComponent(category)}&country=${encodeURIComponent(country)}`
   );
@@ -65,22 +56,41 @@ const normalizeCategory = (cat: string): Category => {
 
 function Home() {
   const [category, setCategory] = useState<Category>("Top");
-
   const { state, award, update } = useAppState();
 
   const [country, setCountryState] = useState<string>(
     () => state.country ?? "GLOBAL"
   );
 
-  // =========================
-  // TIME SELECTOR (RESTORED)
-  // =========================
-  const [refreshMs, setRefreshMs] = useState<number>(0); // OFF default
+  const [mode, setMode] = useState<
+    "off" | "5m" | "10m" | "30m" | "1h" | "24h" | "custom"
+  >("off");
+
   const [customHours, setCustomHours] = useState(0);
   const [customMinutes, setCustomMinutes] = useState(0);
 
-  const preloadedBatchesRef = useRef<Set<string>>(new Set());
+  const getWindowMs = () => {
+    switch (mode) {
+      case "5m":
+        return 5 * 60 * 1000;
+      case "10m":
+        return 10 * 60 * 1000;
+      case "30m":
+        return 30 * 60 * 1000;
+      case "1h":
+        return 60 * 60 * 1000;
+      case "24h":
+        return 24 * 60 * 60 * 1000;
+      case "custom":
+        return (customHours * 60 + customMinutes) * 60 * 1000;
+      default:
+        return 0;
+    }
+  };
 
+  const refreshMs = getWindowMs();
+
+  const preloadedBatchesRef = useRef<Set<string>>(new Set());
   const countryMeta = findCountry(country);
 
   const setCountry = (code: string) => {
@@ -92,11 +102,11 @@ function Home() {
     award("open_app");
   }, []);
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["news", country, category],
     queryFn: () => fetchNews(category, country),
-    refetchInterval: refreshMs > 0 ? refreshMs : false,
-    staleTime: 5 * 60 * 1000,
+    refetchInterval: false,
+    staleTime: 0,
   });
 
   const apiItems: NewsItem[] = (data?.items ?? []).map((n) => ({
@@ -125,60 +135,70 @@ function Home() {
       image: p.media?.find((m) => m.type === "image")?.dataUrl,
     }));
 
-  const allItems: NewsItem[] = [...userItems, ...apiItems].sort(
-    (a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt)
-  );
+  const allItems = [...userItems, ...apiItems];
 
   const now = Date.now();
 
-  const items =
-    refreshMs > 0
-      ? allItems.filter(
-          (i) => now - +new Date(i.publishedAt) <= refreshMs
-        )
-      : allItems;
+  // -----------------------------
+  // 🧠 SMART RECENCY ENGINE
+  // -----------------------------
+  const scoredItems = allItems.map((item) => {
+    const age = now - +new Date(item.publishedAt);
+
+    // freshness score (higher = newer)
+    const freshnessScore = Math.max(0, 1 - age / (24 * 60 * 60 * 1000));
+
+    return {
+      ...item,
+      _score: freshnessScore,
+    };
+  });
+
+  let items: NewsItem[] = [];
+
+  if (mode === "off") {
+    // 🧠 SMART MODE: no filtering, just intelligent ranking
+    items = scoredItems
+      .sort((a, b) => b._score - a._score)
+      .map(({ _score, ...rest }) => rest);
+  } else {
+    // 🧹 HARD FILTER MODE (user-controlled)
+    items = scoredItems
+      .filter((i) => now - +new Date(i.publishedAt) <= refreshMs)
+      .sort((a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt))
+      .map(({ _score, ...rest }) => rest);
+  }
 
   useEffect(() => {
-    if (allItems.length) {
-      cacheArticles(allItems);
-    }
+    if (allItems.length) cacheArticles(allItems);
   }, [data?.fetchedAt, state.userPosts.length]);
 
   useEffect(() => {
     if (!items.length) return;
 
     const batch = items.slice(0, 12);
-    const batchKey = batch.map((b) => b.id).join(",");
+    const key = batch.map((b) => b.id).join(",");
 
-    if (!preloadedBatchesRef.current.has(batchKey)) {
-      preloadedBatchesRef.current.add(batchKey);
+    if (!preloadedBatchesRef.current.has(key)) {
+      preloadedBatchesRef.current.add(key);
 
-      const formatted = batch.map((item) => ({
-        id: item.id,
-        title: item.title,
-        description: item.summary ?? "",
-        url: item.url ?? "",
-        author: item.source ?? "",
-        image: item.image ?? "",
-        language: "en",
-        category: [item.category],
-        published: item.publishedAt,
-      }));
+      fetchPreloadedSummaries(
+        batch.map((i) => ({
+          id: i.id,
+          title: i.title,
+          description: i.summary ?? "",
+          url: i.url ?? "",
+          author: i.source ?? "",
+          image: i.image ?? "",
+          language: "en",
+          category: [i.category],
+          published: i.publishedAt,
+        }))
+      ).catch(() => {});
 
-      fetchPreloadedSummaries(formatted).catch(() => {});
       enqueueArticles(items.slice(0, 12));
     }
   }, [items]);
-
-  // =========================
-  // CUSTOM RANGE APPLY
-  // =========================
-  function applyCustomRange() {
-    const ms =
-      ((customHours || 0) * 60 + (customMinutes || 0)) * 60 * 1000;
-
-    if (ms > 0) setRefreshMs(ms);
-  }
 
   return (
     <div className="min-h-screen bg-background pb-28">
@@ -186,53 +206,45 @@ function Home() {
 
       <Ticker items={items.slice(0, 8).map((i) => i.title)} />
 
-      <main className="mx-auto max-w-md space-y-4 px-4 pb-6 pt-4">
+      <main className="mx-auto max-w-md space-y-4 px-4 pt-4 pb-6">
         <AISummaryCard headlines={items.slice(0, 6).map((i) => i.title)} />
 
         <div className="flex items-center justify-between gap-2">
           <CountrySelector value={country} onChange={setCountry} />
 
-          {/* ================= TIME SELECTOR (RESTORED + SAFE ADDITION) ================= */}
-          <div className="flex items-center gap-2 text-xs">
-            <Timer className="h-3 w-3" />
-
-            {/* ORIGINAL DROPDOWN (UNCHANGED FUNCTIONALLY) */}
+          <div className="flex flex-col gap-1">
             <select
-              value={refreshMs}
-              onChange={(e) => setRefreshMs(Number(e.target.value))}
+              value={mode}
+              onChange={(e) => setMode(e.target.value as any)}
               className="text-xs border rounded px-2 py-1"
             >
-              <option value={0}>Off</option>
-              <option value={300000}>5 min</option>
-              <option value={600000}>10 min</option>
-              <option value={1800000}>30 min</option>
-              <option value={3600000}>1 hour</option>
-              <option value={86400000}>24 hours</option>
+              <option value="off">Smart (Off)</option>
+              <option value="5m">5 min</option>
+              <option value="10m">10 min</option>
+              <option value="30m">30 min</option>
+              <option value="1h">1 hour</option>
+              <option value="24h">24 hours</option>
+              <option value="custom">Custom</option>
             </select>
 
-            {/* CUSTOM RANGE (ADDITIVE ONLY, DOES NOT REPLACE UI) */}
-            <input
-              type="number"
-              placeholder="hrs"
-              value={customHours}
-              onChange={(e) => setCustomHours(Number(e.target.value))}
-              className="w-12 text-xs border rounded px-1"
-            />
-
-            <input
-              type="number"
-              placeholder="min"
-              value={customMinutes}
-              onChange={(e) => setCustomMinutes(Number(e.target.value))}
-              className="w-12 text-xs border rounded px-1"
-            />
-
-            <button
-              onClick={applyCustomRange}
-              className="px-2 py-1 border rounded"
-            >
-              set
-            </button>
+            {mode === "custom" && (
+              <div className="flex gap-1">
+                <input
+                  type="number"
+                  value={customHours}
+                  onChange={(e) => setCustomHours(Number(e.target.value))}
+                  className="w-12 text-xs border rounded px-1"
+                  placeholder="h"
+                />
+                <input
+                  type="number"
+                  value={customMinutes}
+                  onChange={(e) => setCustomMinutes(Number(e.target.value))}
+                  className="w-12 text-xs border rounded px-1"
+                  placeholder="m"
+                />
+              </div>
+            )}
           </div>
         </div>
 
@@ -247,10 +259,6 @@ function Home() {
             <Loader2 className="h-3 w-3 animate-spin" />
             Loading feed...
           </div>
-        )}
-
-        {error && (
-          <div className="text-xs text-red-500">Failed to load news</div>
         )}
 
         <div className="space-y-3">
