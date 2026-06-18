@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { TopBar } from "@/components/TopBar";
@@ -24,25 +24,11 @@ export const Route = createFileRoute("/")({
   component: Home,
 });
 
-/* ---------------- RECENCY MODES (NO SLIDER VERSION) ---------------- */
+/* ---------------- TYPES ---------------- */
 
-type RecencyMode = "OFF" | "5M" | "30M" | "1H" | "LIVE" | "CUSTOM";
+type Mode = "OFF" | "5M" | "30M" | "1H" | "CUSTOM";
 
-const MODE_VALUES: Record<RecencyMode, number> = {
-  OFF: 0,
-  "5M": 5 * 60 * 1000,
-  "30M": 30 * 60 * 1000,
-  "1H": 60 * 60 * 1000,
-  LIVE: 15 * 1000,
-  CUSTOM: -1,
-};
-
-function normalizeCategory(cat: string): Category {
-  const found = CATEGORIES.find(
-    (c) => c.toLowerCase() === cat.toLowerCase()
-  );
-  return found ?? "Top";
-}
+/* ---------------- FETCH ---------------- */
 
 async function fetchNews(category: Category, country: string) {
   const res = await fetch(
@@ -51,19 +37,32 @@ async function fetchNews(category: Category, country: string) {
   return res.json();
 }
 
+function normalizeCategory(cat: string): Category {
+  const found = CATEGORIES.find(
+    (c) => c.toLowerCase() === cat.toLowerCase()
+  );
+  return found ?? "Top";
+}
+
 /* ---------------- HOME ---------------- */
 
 function Home() {
   const [category, setCategory] = useState<Category>("Top");
-  const [country, setCountryState] = useState("GLOBAL");
-
-  const [mode, setMode] = useState<RecencyMode>("OFF");
-  const [refreshMs, setRefreshMs] = useState<number>(0);
-
-  const [customHours, setCustomHours] = useState(0);
-  const [customMinutes, setCustomMinutes] = useState(0);
 
   const { state, update } = useAppState();
+
+  const [country, setCountryState] = useState<string>(
+    () => state.country ?? "GLOBAL"
+  );
+
+  /* ---------------- TIME CONTROL ---------------- */
+
+  const [mode, setMode] = useState<Mode>("OFF");
+  const [refreshMs, setRefreshMs] = useState<number>(0);
+
+  const [customH, setCustomH] = useState(0);
+  const [customM, setCustomM] = useState(0);
+
   const countryMeta = findCountry(country);
 
   const setCountry = (code: string) => {
@@ -71,19 +70,33 @@ function Home() {
     update((s) => ({ ...s, country: code }));
   };
 
-  /* ---------------- MODE SYNC ---------------- */
+  /* ---------------- APPLY MODE ---------------- */
 
   useEffect(() => {
-    if (mode !== "CUSTOM") {
-      setRefreshMs(MODE_VALUES[mode]);
+    switch (mode) {
+      case "OFF":
+        setRefreshMs(0);
+        break;
+      case "5M":
+        setRefreshMs(5 * 60 * 1000);
+        break;
+      case "30M":
+        setRefreshMs(30 * 60 * 1000);
+        break;
+      case "1H":
+        setRefreshMs(60 * 60 * 1000);
+        break;
+      case "CUSTOM":
+        break;
     }
   }, [mode]);
 
-  const applyCustom = () => {
-    const ms = (customHours * 60 + customMinutes) * 60 * 1000;
+  function applyCustom() {
+    const ms = (customH * 60 + customM) * 60 * 1000;
+
     setRefreshMs(ms);
     setMode("CUSTOM");
-  };
+  }
 
   /* ---------------- DATA ---------------- */
 
@@ -144,61 +157,58 @@ function Home() {
 
         <CountrySelector value={country} onChange={setCountry} />
 
-        {/* ---------------- SEGMENTED CONTROL ONLY ---------------- */}
-        <div className="border rounded p-2 space-y-2">
+        {/* ---------------- TIME CONTROL (FIXED CLEAN UI) ---------------- */}
 
-          <div className="flex flex-wrap gap-2 text-xs">
-            {(["OFF", "5M", "30M", "1H", "LIVE"] as RecencyMode[]).map(
-              (m) => (
-                <button
-                  key={m}
-                  onClick={() => setMode(m)}
-                  className={`px-2 py-1 border rounded ${
-                    mode === m ? "bg-black text-white" : ""
-                  }`}
-                >
-                  {m}
-                </button>
-              )
-            )}
+        <div className="border rounded p-3 space-y-3">
+
+          {/* SEGMENTED CONTROL */}
+          <div className="flex gap-2 text-xs flex-wrap">
+            {[
+              { key: "OFF", label: "OFF" },
+              { key: "5M", label: "5m" },
+              { key: "30M", label: "30m" },
+              { key: "1H", label: "1h" },
+            ].map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setMode(t.key as Mode)}
+                className={`px-2 py-1 border rounded ${
+                  mode === t.key ? "bg-black text-white" : ""
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* CUSTOM INPUT */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground">custom</span>
+
+            <input
+              type="number"
+              placeholder="hrs"
+              value={customH}
+              onChange={(e) => setCustomH(Number(e.target.value))}
+              className="w-12 text-xs border rounded px-1"
+            />
+
+            <input
+              type="number"
+              placeholder="min"
+              value={customM}
+              onChange={(e) => setCustomM(Number(e.target.value))}
+              className="w-12 text-xs border rounded px-1"
+            />
 
             <button
-              onClick={() => setMode("CUSTOM")}
-              className={`px-2 py-1 border rounded ${
-                mode === "CUSTOM" ? "bg-black text-white" : ""
-              }`}
+              onClick={applyCustom}
+              className="text-xs px-2 py-1 border rounded"
             >
-              CUSTOM
+              set
             </button>
           </div>
 
-          {/* CUSTOM INPUT ONLY WHEN ACTIVE */}
-          {mode === "CUSTOM" && (
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                placeholder="hrs"
-                className="w-12 text-xs border rounded px-1"
-                value={customHours}
-                onChange={(e) => setCustomHours(Number(e.target.value))}
-              />
-
-              <input
-                type="number"
-                placeholder="min"
-                className="w-12 text-xs border rounded px-1"
-                value={customMinutes}
-                onChange={(e) => setCustomMinutes(Number(e.target.value))}
-              />
-
-              <button
-                onClick={applyCustom}
-                className="text-xs px-2 py-1 border rounded"
-              >
-                Apply
-              </button>
-            </div>
-          )}
         </div>
 
         <CategoryTabs value={category} onChange={setCategory} />
@@ -215,7 +225,9 @@ function Home() {
         )}
 
         {error && (
-          <div className="text-xs text-red-500">Failed to load news</div>
+          <div className="text-xs text-red-500">
+            Failed to load news
+          </div>
         )}
 
         <div className="space-y-3">
