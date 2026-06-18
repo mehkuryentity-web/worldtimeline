@@ -24,22 +24,18 @@ export const Route = createFileRoute("/")({
   component: Home,
 });
 
-/* ---------------- TIME CONTROL ---------------- */
+/* ---------------- CORE RECENCY MODES ---------------- */
 
-const SLIDER_VALUES = [
-  0, // OFF
-  5 * 60 * 1000,
-  10 * 60 * 1000,
-  30 * 60 * 1000,
-  60 * 60 * 1000,
-  24 * 60 * 60 * 1000,
-];
+type RecencyMode = "OFF" | "5M" | "30M" | "1H" | "LIVE" | "CUSTOM";
 
-function formatLabel(ms: number) {
-  if (ms === 0) return "Off";
-  if (ms < 60 * 60 * 1000) return `${ms / 60000} min`;
-  return `${ms / 3600000} hr`;
-}
+const RECENCY_MAP: Record<RecencyMode, number> = {
+  OFF: 0,
+  "5M": 5 * 60 * 1000,
+  "30M": 30 * 60 * 1000,
+  "1H": 60 * 60 * 1000,
+  LIVE: 15 * 1000, // near-real-time refresh feel
+  CUSTOM: -1,
+};
 
 function normalizeCategory(cat: string): Category {
   const found = CATEGORIES.find(
@@ -61,20 +57,35 @@ function Home() {
   const [category, setCategory] = useState<Category>("Top");
   const [country, setCountryState] = useState("GLOBAL");
 
-  // main recency window (OFF default)
+  const [mode, setMode] = useState<RecencyMode>("OFF");
   const [refreshMs, setRefreshMs] = useState<number>(0);
 
-  // custom input
   const [customHours, setCustomHours] = useState(0);
   const [customMinutes, setCustomMinutes] = useState(0);
 
   const { state, update } = useAppState();
+
   const countryMeta = findCountry(country);
 
   const setCountry = (code: string) => {
     setCountryState(code);
     update((s) => ({ ...s, country: code }));
   };
+
+  /* ---------------- APPLY MODE ---------------- */
+
+  useEffect(() => {
+    if (mode === "CUSTOM") return;
+    setRefreshMs(RECENCY_MAP[mode]);
+  }, [mode]);
+
+  const applyCustom = () => {
+    const ms = (customHours * 60 + customMinutes) * 60 * 1000;
+    setRefreshMs(ms);
+    setMode("CUSTOM");
+  };
+
+  /* ---------------- NEWS FETCH ---------------- */
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["news", country, category],
@@ -120,16 +131,7 @@ function Home() {
         )
       : allItems;
 
-  /* ---------------- TIME LOGIC ---------------- */
-
-  function setFromSlider(value: number) {
-    setRefreshMs(value);
-  }
-
-  function applyCustomRange() {
-    const ms = (customHours * 60 + customMinutes) * 60 * 1000;
-    setRefreshMs(ms);
-  }
+  /* ---------------- UI ---------------- */
 
   return (
     <div className="min-h-screen bg-background pb-28">
@@ -142,50 +144,62 @@ function Home() {
 
         <CountrySelector value={country} onChange={setCountry} />
 
-        {/* ---------------- TIME CONTROL BAR ---------------- */}
-        <div className="flex flex-col gap-2 border rounded p-2">
+        {/* ---------------- SMART SEGMENTED CONTROL ---------------- */}
+        <div className="space-y-2 border rounded p-2">
 
-          {/* SLIDER */}
-          <input
-            type="range"
-            min={0}
-            max={SLIDER_VALUES.length - 1}
-            value={SLIDER_VALUES.indexOf(refreshMs)}
-            onChange={(e) =>
-              setFromSlider(SLIDER_VALUES[Number(e.target.value)])
-            }
-          />
-
-          {/* LABEL */}
-          <div className="text-xs text-muted-foreground">
-            Recency: {formatLabel(refreshMs)}
-          </div>
-
-          {/* CUSTOM RANGE */}
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              placeholder="hrs"
-              className="w-12 text-xs border rounded px-1"
-              value={customHours}
-              onChange={(e) => setCustomHours(Number(e.target.value))}
-            />
-
-            <input
-              type="number"
-              placeholder="min"
-              className="w-12 text-xs border rounded px-1"
-              value={customMinutes}
-              onChange={(e) => setCustomMinutes(Number(e.target.value))}
-            />
+          {/* SEGMENTS */}
+          <div className="flex flex-wrap gap-2 text-xs">
+            {(["OFF", "5M", "30M", "1H", "LIVE"] as RecencyMode[]).map(
+              (m) => (
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  className={`px-2 py-1 rounded border ${
+                    mode === m ? "bg-black text-white" : ""
+                  }`}
+                >
+                  {m}
+                </button>
+              )
+            )}
 
             <button
-              onClick={applyCustomRange}
-              className="text-xs px-2 py-1 border rounded"
+              onClick={() => setMode("CUSTOM")}
+              className={`px-2 py-1 rounded border ${
+                mode === "CUSTOM" ? "bg-black text-white" : ""
+              }`}
             >
-              Apply
+              CUSTOM
             </button>
           </div>
+
+          {/* CUSTOM INPUT (ONLY WHEN ACTIVE) */}
+          {mode === "CUSTOM" && (
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                placeholder="hrs"
+                className="w-12 text-xs border rounded px-1"
+                value={customHours}
+                onChange={(e) => setCustomHours(Number(e.target.value))}
+              />
+
+              <input
+                type="number"
+                placeholder="min"
+                className="w-12 text-xs border rounded px-1"
+                value={customMinutes}
+                onChange={(e) => setCustomMinutes(Number(e.target.value))}
+              />
+
+              <button
+                onClick={applyCustom}
+                className="text-xs px-2 py-1 border rounded"
+              >
+                Apply
+              </button>
+            </div>
+          )}
         </div>
 
         <CategoryTabs value={category} onChange={setCategory} />
