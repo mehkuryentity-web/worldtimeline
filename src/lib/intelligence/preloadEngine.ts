@@ -1,10 +1,21 @@
-import { mergeSummaryCache, loadSummaryCache } from "./aiCache";
+import { mergeSummaryCache } from "./aiCache";
 import { fetchPreloadedSummaries } from "@/lib/news.functions";
 
-let running = false;
-let queue: any[] = [];
+type QueueItem = {
+  id: string;
+  title: string;
+  summary?: string;
+  url?: string;
+  source?: string;
+  image?: string;
+  category?: string | string[];
+  publishedAt?: string;
+};
 
-export function enqueueArticles(items: any[]) {
+let running = false;
+let queue: QueueItem[] = [];
+
+export function enqueueArticles(items: QueueItem[]) {
   queue.push(...items);
   run();
 }
@@ -19,23 +30,26 @@ async function run() {
 
       const formatted = batch.map((item) => ({
         id: item.id,
-        title: item.title,
-        description: item.summary || "",
-        url: item.url || "",
-        author: item.source || "",
-        image: item.image || "",
+        title: item.title ?? "Untitled",
+        description: item.summary ?? "",
+        url: item.url ?? "",
+        author: item.source ?? "",
+        image: item.image ?? "",
         language: "en",
-        category: [item.category],
-        published: item.publishedAt,
+        category: Array.isArray(item.category)
+          ? item.category
+          : item.category
+          ? [item.category]
+          : ["Top"],
+        published: item.publishedAt ?? new Date().toISOString(),
       }));
 
       const result = await fetchPreloadedSummaries(formatted);
 
-      if (result) {
+      if (result && Object.keys(result).length > 0) {
         mergeSummaryCache(result);
       }
 
-      // soft delay so you don’t overload edge function
       await new Promise((r) => setTimeout(r, 300));
     }
   } finally {
