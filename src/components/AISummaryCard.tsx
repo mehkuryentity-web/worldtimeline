@@ -16,7 +16,8 @@ export function AISummaryCard({ headlines, country }: Props) {
   const [briefing, setBriefing] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  const [secondsLeft, setSecondsLeft] = useState(300); // 5 minutes
+  // 5-minute cycle controller
+  const [secondsLeft, setSecondsLeft] = useState(300);
   const [version, setVersion] = useState(0);
 
   /* -----------------------------
@@ -25,41 +26,41 @@ export function AISummaryCard({ headlines, country }: Props) {
   const build = () => {
     setLoading(true);
 
-    const res = buildBriefing({
+    const result = buildBriefing({
       headlines,
       userName,
       country,
     });
 
-    setBriefing(res);
+    setBriefing(result);
     setLoading(false);
   };
 
   /* -----------------------------
-     REBUILD ON VERSION CHANGE
+     REBUILD ON CHANGE
   ------------------------------*/
   useEffect(() => {
     build();
   }, [version, headlines, userName, country]);
 
   /* -----------------------------
-     REAL COUNTDOWN TIMER
+     5-MINUTE COUNTDOWN + AUTO REFRESH
   ------------------------------*/
   useEffect(() => {
     const timer = setInterval(() => {
-      setSecondsLeft((s) => {
-        if (s <= 1) {
+      setSecondsLeft((prev) => {
+        if (prev <= 1) {
           setVersion((v) => v + 1); // auto refresh
           return 300;
         }
-        return s - 1;
+        return prev - 1;
       });
     }, 1000);
 
     return () => clearInterval(timer);
   }, []);
 
-  const refresh = () => {
+  const manualRefresh = () => {
     setVersion((v) => v + 1);
     setSecondsLeft(300);
   };
@@ -76,8 +77,11 @@ export function AISummaryCard({ headlines, country }: Props) {
           AI Briefing · {mm}:{ss}
         </div>
 
-        <button onClick={refresh}>
-          <RefreshCw className="h-3 w-3 text-muted-foreground" />
+        <button
+          onClick={manualRefresh}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <RefreshCw className="h-3 w-3" />
         </button>
       </div>
 
@@ -88,15 +92,18 @@ export function AISummaryCard({ headlines, country }: Props) {
           Composing briefing...
         </div>
       ) : (
-        <div className="space-y-3 text-sm leading-relaxed">
+        <div className="space-y-3 text-sm leading-relaxed text-foreground/90">
 
+          {/* OPENING */}
           <p className="font-medium">{briefing.opening}</p>
 
-          {briefing.stories.map((s: string, i: number) => (
-            <p key={i}>{s}</p>
-          ))}
+          {/* SINGLE NEWSROOM PARAGRAPH (NO MAP ANYMORE) */}
+          <p>
+            {briefing.newsroomParagraph}
+          </p>
 
-          <p className="font-semibold border-t pt-2">
+          {/* CONCLUSION */}
+          <p className="font-semibold border-t border-border pt-2">
             {briefing.conclusion}
           </p>
 
