@@ -46,7 +46,7 @@ export const fetchLiveNews = async (data: {
 };
 
 /* ---------------------------------------
-   GEMINI BRIEFING (FINAL LOCKED VERSION)
+   GEMINI BRIEFING
 ----------------------------------------*/
 
 export const generateBriefing = async (data: {
@@ -64,110 +64,124 @@ export const generateBriefing = async (data: {
     return { summary: "Briefing system misconfigured.", error: "NO_KEY" };
   }
 
-  try {
-    const url =
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+  const cleanHeadlines = data.headlines
+    .slice(0, 5)
+    .map((h) => h?.trim())
+    .filter(Boolean);
 
-    const cleanHeadlines = data.headlines
-      .slice(0, 5)
-      .map((h) => h?.trim())
-      .filter(Boolean);
+  const userName =
+    typeof data.userName === "string" && data.userName.trim().length > 0
+      ? data.userName.trim()
+      : null;
 
-    if (!cleanHeadlines.length) {
-      return { summary: "No live signals available." };
-    }
+  const promptText = `
+You are a live newsroom editor.
 
-    // STRICT identity rule: NEVER invent names
-    const userName =
-      typeof data.userName === "string" && data.userName.trim().length > 0
-        ? data.userName.trim()
-        : null;
+OUTPUT:
+- Greeting
+- ONE flowing paragraph
+- ONE witty closing line
 
-    const promptText = `
-You are a live newsroom editor writing a real-time news briefing.
-
-OUTPUT STRUCTURE (MANDATORY):
-1. Greeting line
-2. ONE flowing newsroom paragraph
-3. ONE short witty closing line
-
-IDENTITY RULE:
-- If a user name exists, use "Hi [Name],"
-- If no user name exists, use "Hi,"
-
-STYLE:
-- Fast-paced newsroom wire tone (BBC / Reuters feel)
-- Subtle dry wit allowed (restrained, not comedic)
-- Clean transitions like "Meanwhile", "At the same time", "Elsewhere"
-- Neutral, factual narration
-
-STRICT RULES:
-- One paragraph only for the main body
-- No bullet points, no lists
+RULES:
+- No bullet points
+- No lists
 - No moral commentary
-- No emotional storytelling
-- No summarizing each headline individually
-- No invented identities or assumptions
+- No fake identities
+- Newsroom tone with subtle wit
 
-WIT RULES:
-- Closing line must be short, slightly sharp, editorial in tone
-- No jokes, no slang, no exaggeration
+Greeting rule:
+- If name exists: "Hi [Name],"
+- Else: "Hi,"
 
-INPUT HEADLINES:
+HEADLINES:
 ${cleanHeadlines.join("\n")}
 `;
 
-    const res = await fetch(url, {
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: promptText }] }],
+    }),
+  });
+
+  if (!res.ok) throw new Error(`Gemini API error: ${res.status}`);
+
+  const json = await res.json();
+
+  let summary =
+    json?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+
+  if (!summary) {
+    return { summary: "Briefing failed to generate." };
+  }
+
+  if (!summary.startsWith("Hi")) {
+    summary = userName
+      ? `Hi ${userName}, ${summary}`
+      : `Hi, ${summary}`;
+  }
+
+  if (!summary.includes("\n")) {
+    summary += `\nToday continues beyond the headlines.`;
+  }
+
+  return { summary };
+};
+
+/* ---------------------------------------
+   PRELOADED SUMMARIES (SINGLE SOURCE)
+----------------------------------------*/
+
+export const fetchPreloadedSummaries = async (
+  items: ApiNewsItem[]
+): Promise<Record<string, string>> => {
+  try {
+    const url =
+      "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/article-summary";
+
+    const SUPABASE_KEY =
+      (import.meta.env && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) ||
+      (window as any)._env_?.VITE_SUPABASE_PUBLISHABLE_KEY ||
+      "";
+
+    if (!SUPABASE_KEY) return {};
+
+    const normalized = items.map((item) => ({
+      id: item.id,
+      title: item.title,
+      description: item.description || item.summary || "",
+      url: item.url,
+      author: item.source || item.author || "",
+      image: item.image || "",
+      language: item.language || "en",
+      category: Array.isArray(item.category)
+        ? item.category
+        : item.category
+        ? [item.category]
+        : ["Top"],
+      published:
+        item.publishedAt || item.published || new Date().toISOString(),
+    }));
+
+    const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Authorization: `Bearer ${SUPABASE_KEY}`,
       },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [{ text: promptText }],
-          },
-        ],
-      }),
+      body: JSON.stringify({ articles: normalized }),
     });
 
-    if (!res.ok) throw new Error(`Gemini API error: ${res.status}`);
+    if (!response.ok) return {};
 
-    const json = await res.json();
+    const data = await response.json();
 
-    let summary =
-      json?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
-
-    if (!summary) throw new Error("Empty Gemini response");
-
-    /* ---------------------------------------
-       SAFETY ENFORCEMENT (FINAL GUARD RAILS)
-    ----------------------------------------*/
-
-    // Ensure greeting is correct and NEVER fake identity
-    if (!summary.startsWith("Hi")) {
-      summary = userName
-        ? `Hi ${userName}, ${summary}`
-        : `Hi, ${summary}`;
-    }
-
-    // Ensure closing line exists
-    const lines = summary.split("\n").filter(Boolean);
-
-    if (lines.length < 2) {
-      summary += `\nToday continues, even when reporting pauses.`;
-    }
-
-    return { summary };
-  } catch (e) {
-    console.error("Briefing generation failed:", e);
-
-    return {
-      summary:
-        data.userName
-          ? `Hi ${data.userName}, live briefing is temporarily unavailable.\nToday continues, even when systems pause.`
-          : `Hi, live briefing is temporarily unavailable.\nToday continues, even when systems pause.`,
-      error: e instanceof Error ? e.message : "UNKNOWN_ERROR",
-    };
+    return data?.summaries || {};
+  } catch {
+    return {};
   }
 };
