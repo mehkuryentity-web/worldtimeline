@@ -7,143 +7,77 @@ export interface BriefingInput {
   refreshKey?: number;
 }
 
-/* -------------------------------------------------
-   HARD STYLE LOCK (KILLS AI TONE RESIDUE)
---------------------------------------------------*/
-
-const BLOCKED_PHRASES = [
-  "does not exist in isolation",
-  "larger pattern",
-  "connected storyline",
+const BAD = [
   "global cycle",
+  "connected storyline",
   "unfolding narrative",
   "part of today",
-  "shaped by",
-  "is adding momentum",
+  "adding momentum",
+  "is part of",
 ];
 
-function stripAI(text: string) {
+function clean(text: string) {
   let t = text;
-  for (const p of BLOCKED_PHRASES) {
-    t = t.replace(new RegExp(p, "gi"), "");
-  }
-  return t
-    .replace(/\s+/g, " ")
-    .replace(/\-\s+$/, "")
-    .trim();
+  BAD.forEach((b) => {
+    t = t.replace(new RegExp(b, "gi"), "");
+  });
+  return t.replace(/\s+/g, " ").trim();
 }
 
-function cleanHeadlines(headlines: string[]) {
-  return headlines
-    .map(stripAI)
-    .filter(Boolean)
-    .filter((h) => h.length > 20)
-    .slice(0, 20);
+function identity(name?: string | null) {
+  return getBriefIdentity(name);
 }
 
-/* -------------------------------------------------
-   IDENTITY
---------------------------------------------------*/
-
-function identity(userName?: string | null) {
-  return getBriefIdentity(userName);
-}
-
-/* -------------------------------------------------
-   COUNTRY CONTEXT
---------------------------------------------------*/
-
-function country(country?: string) {
-  return !country || country === "GLOBAL" ? "global" : country;
-}
-
-/* -------------------------------------------------
-   OPENING (CONVERSATIONAL, NOT REPORTIVE)
---------------------------------------------------*/
-
-function opening(name: string, region: string) {
+function opening(name: string, country?: string) {
   const hooks = [
-    "today is moving like it woke up late and is trying to catch up aggressively.",
-    "today feels slightly uncoordinated but oddly connected.",
-    "today is loud in different directions at once.",
-    "today behaves like it has too many tabs open in its head.",
+    "today feels slightly off-balance but active.",
+    "today is moving fast without coordination.",
+    "today feels like too many things happening at once.",
+    "today has no patience for structure.",
   ];
 
-  const hook = hooks[Math.floor(Math.random() * hooks.length)];
+  const h = hooks[Math.floor(Math.random() * hooks.length)];
 
-  return `Hi ${name}, ${region === "global" ? "global briefing" : region} — ${hook}`;
+  return `Hi ${name}, ${country ?? "global"} — ${h}`;
 }
 
-/* -------------------------------------------------
-   STORY TRANSFORM (HUMAN VOICE, NO AI FILLER)
---------------------------------------------------*/
-
-function story(headline: string) {
-  const endings = [
-    "— and that’s still unfolding.",
-    "— and it’s dragging attention with it.",
-    "— and people are already reacting to it.",
-    "— and it’s not sitting quietly in the background.",
+function story(h: string) {
+  const tails = [
+    "and it’s still developing.",
+    "and people are reacting to it.",
+    "and it’s not settled yet.",
+    "and it’s pulling attention with it.",
   ];
 
-  const end = endings[Math.floor(Math.random() * endings.length)];
-
-  return `${headline} ${end}`;
+  return `${clean(h)} — ${tails[Math.floor(Math.random() * tails.length)]}`;
 }
 
-/* -------------------------------------------------
-   CONCLUSION (SINGLE LINE, SHARP, HUMAN)
---------------------------------------------------*/
-
-function conclusion(headlines: string[], region: string) {
+function conclusion(headlines: string[], country?: string) {
   const text = headlines.join(" ").toLowerCase();
 
-  let tone = "uneven and reactive";
+  let tone = "uneven";
 
-  if (text.includes("war") || text.includes("conflict")) {
-    tone = "tense and unstable";
-  } else if (text.includes("economy") || text.includes("market")) {
-    tone = "financially jittery";
-  } else if (text.includes("tech") || text.includes("ai")) {
-    tone = "moving faster than understanding";
-  }
+  if (text.includes("war")) tone = "tense";
+  if (text.includes("economy")) tone = "financially unstable";
+  if (text.includes("tech")) tone = "rapidly accelerating";
 
   const endings = [
-    "Nothing is settled — it’s just moving in different directions at once.",
-    "It’s all connected, but nothing is coordinated.",
-    "Today didn’t calm down — it scattered more evenly.",
-    "The noise is structured, not random.",
+    "Nothing is stable — everything is moving at different speeds.",
+    "The pattern exists, but control doesn’t.",
+    "It’s structured noise, not randomness.",
   ];
 
-  const end = endings[Math.floor(Math.random() * endings.length)];
-
-  return region === "global"
-    ? `Overall, today’s global mood is ${tone}. ${end}`
-    : `Overall, ${region} feels ${tone}. ${end}`;
+  return `Overall, ${country ?? "global"} feels ${tone}. ${
+    endings[Math.floor(Math.random() * endings.length)]
+  }`;
 }
 
-/* -------------------------------------------------
-   MAIN ENGINE
---------------------------------------------------*/
-
 export function buildBriefing(input: BriefingInput) {
-  const cleaned = cleanHeadlines(input.headlines);
-
   const name = identity(input.userName);
-  const region = country(input.country);
-
-  const openingLine = opening(name, region);
-
-  const stories = cleaned.slice(0, 5).map(story);
-
-  while (stories.length < 5) {
-    stories.push("Another story is still developing quietly in the background.");
-  }
 
   return {
-    identity: name,
-    opening: openingLine,
-    stories,
-    conclusion: conclusion(cleaned, region),
+    opening: opening(name, input.country),
+    stories: input.headlines.slice(0, 5).map(story),
+    conclusion: conclusion(input.headlines, input.country),
   };
 }
