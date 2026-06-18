@@ -11,38 +11,55 @@ interface Props {
 export function AISummaryCard({ headlines, country }: Props) {
   const { state } = useAppState();
 
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [briefing, setBriefing] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [time, setTime] = useState(Date.now());
-
   const userName = state?.user?.name ?? null;
 
-  useEffect(() => {
+  const [briefing, setBriefing] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  // THIS IS THE SINGLE SOURCE OF TRUTH FOR REFRESH
+  const [version, setVersion] = useState(0);
+
+  const build = () => {
     setLoading(true);
 
     const result = buildBriefing({
       headlines,
       userName,
       country,
-      refreshKey,
+      refreshKey: version,
     });
 
     setBriefing(result);
     setLoading(false);
-    setTime(Date.now());
-  }, [headlines, userName, country, refreshKey]);
+  };
+
+  // rebuild whenever version changes
+  useEffect(() => {
+    build();
+  }, [version, headlines, userName, country]);
+
+  // AUTO REFRESH EVERY 5 MINUTES (REAL ONE)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setVersion((v) => v + 1);
+    }, 5 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const refresh = () => setVersion((v) => v + 1);
 
   return (
     <div className="rounded-xl border border-border bg-surface-1 p-4 space-y-3">
+
       {/* HEADER */}
       <div className="flex items-center justify-between">
         <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-          AI Briefing · {new Date(time).toLocaleTimeString().slice(0, 5)}
+          AI Briefing · {new Date().toLocaleTimeString().slice(0, 5)}
         </div>
 
         <button
-          onClick={() => setRefreshKey((k) => k + 1)}
+          onClick={refresh}
           className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
         >
           <RefreshCw className="h-3 w-3" />
@@ -57,6 +74,7 @@ export function AISummaryCard({ headlines, country }: Props) {
         </div>
       ) : (
         <div className="space-y-3 text-sm leading-relaxed text-foreground/90">
+
           <p className="font-medium">{briefing.opening}</p>
 
           {briefing.stories.map((s: string, i: number) => (
@@ -66,6 +84,7 @@ export function AISummaryCard({ headlines, country }: Props) {
           <p className="font-semibold pt-2 border-t border-border">
             {briefing.conclusion}
           </p>
+
         </div>
       )}
     </div>
