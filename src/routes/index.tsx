@@ -24,12 +24,6 @@ export const Route = createFileRoute("/")({
   component: Home,
 });
 
-/* ---------------- TYPES ---------------- */
-
-type Mode = "OFF" | "5M" | "30M" | "1H" | "CUSTOM";
-
-/* ---------------- FETCH ---------------- */
-
 async function fetchNews(category: Category, country: string) {
   const res = await fetch(
     `/api/news?category=${encodeURIComponent(category)}&country=${encodeURIComponent(country)}`
@@ -44,21 +38,17 @@ function normalizeCategory(cat: string): Category {
   return found ?? "Top";
 }
 
-/* ---------------- HOME ---------------- */
-
 function Home() {
   const [category, setCategory] = useState<Category>("Top");
-
   const { state, update } = useAppState();
 
   const [country, setCountryState] = useState<string>(
     () => state.country ?? "GLOBAL"
   );
 
-  /* ---------------- TIME CONTROL ---------------- */
+  /* ---------------- TIME SELECTOR (FIXED) ---------------- */
 
-  const [mode, setMode] = useState<Mode>("OFF");
-  const [refreshMs, setRefreshMs] = useState<number>(0);
+  const [refreshMs, setRefreshMs] = useState<number>(0); // OFF default
 
   const [customH, setCustomH] = useState(0);
   const [customM, setCustomM] = useState(0);
@@ -70,35 +60,7 @@ function Home() {
     update((s) => ({ ...s, country: code }));
   };
 
-  /* ---------------- APPLY MODE ---------------- */
-
-  useEffect(() => {
-    switch (mode) {
-      case "OFF":
-        setRefreshMs(0);
-        break;
-      case "5M":
-        setRefreshMs(5 * 60 * 1000);
-        break;
-      case "30M":
-        setRefreshMs(30 * 60 * 1000);
-        break;
-      case "1H":
-        setRefreshMs(60 * 60 * 1000);
-        break;
-      case "CUSTOM":
-        break;
-    }
-  }, [mode]);
-
-  function applyCustom() {
-    const ms = (customH * 60 + customM) * 60 * 1000;
-
-    setRefreshMs(ms);
-    setMode("CUSTOM");
-  }
-
-  /* ---------------- DATA ---------------- */
+  /* ---------------- QUERY ---------------- */
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["news", country, category],
@@ -144,6 +106,13 @@ function Home() {
         )
       : allItems;
 
+  /* ---------------- CUSTOM RANGE APPLY ---------------- */
+
+  function applyCustom() {
+    const ms = (customH * 60 + customM) * 60 * 1000;
+    setRefreshMs(ms);
+  }
+
   /* ---------------- UI ---------------- */
 
   return (
@@ -157,54 +126,48 @@ function Home() {
 
         <CountrySelector value={country} onChange={setCountry} />
 
-        {/* ---------------- TIME CONTROL (FIXED CLEAN UI) ---------------- */}
+        {/* ================= TIME SELECTOR (CLEAN + RESTORED) ================= */}
 
-        <div className="border rounded p-3 space-y-3">
+        <div className="flex items-center gap-2 flex-wrap text-xs border rounded p-2">
 
-          {/* SEGMENTED CONTROL */}
-          <div className="flex gap-2 text-xs flex-wrap">
-            {[
-              { key: "OFF", label: "OFF" },
-              { key: "5M", label: "5m" },
-              { key: "30M", label: "30m" },
-              { key: "1H", label: "1h" },
-            ].map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setMode(t.key as Mode)}
-                className={`px-2 py-1 border rounded ${
-                  mode === t.key ? "bg-black text-white" : ""
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+          <button onClick={() => setRefreshMs(0)} className="px-2 py-1 border rounded">
+            OFF
+          </button>
 
-          {/* CUSTOM INPUT */}
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground">custom</span>
+          <button onClick={() => setRefreshMs(5 * 60 * 1000)} className="px-2 py-1 border rounded">
+            5m
+          </button>
 
+          <button onClick={() => setRefreshMs(30 * 60 * 1000)} className="px-2 py-1 border rounded">
+            30m
+          </button>
+
+          <button onClick={() => setRefreshMs(60 * 60 * 1000)} className="px-2 py-1 border rounded">
+            1h
+          </button>
+
+          {/* 24 HOUR SUPPORT (FIX YOU REQUESTED) */}
+          <button onClick={() => setRefreshMs(24 * 60 * 60 * 1000)} className="px-2 py-1 border rounded">
+            24h
+          </button>
+
+          {/* CUSTOM RANGE */}
+          <div className="flex items-center gap-1 ml-2">
             <input
               type="number"
-              placeholder="hrs"
+              placeholder="h"
               value={customH}
               onChange={(e) => setCustomH(Number(e.target.value))}
-              className="w-12 text-xs border rounded px-1"
+              className="w-10 border rounded px-1"
             />
-
             <input
               type="number"
-              placeholder="min"
+              placeholder="m"
               value={customM}
               onChange={(e) => setCustomM(Number(e.target.value))}
-              className="w-12 text-xs border rounded px-1"
+              className="w-10 border rounded px-1"
             />
-
-            <button
-              onClick={applyCustom}
-              className="text-xs px-2 py-1 border rounded"
-            >
+            <button onClick={applyCustom} className="px-2 py-1 border rounded">
               set
             </button>
           </div>
