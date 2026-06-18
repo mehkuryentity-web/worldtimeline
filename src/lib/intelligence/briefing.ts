@@ -7,9 +7,9 @@ export interface BriefingInput {
   country?: string;
 }
 
-/* -------------------------------------------------
-   1. HARD FILTER — REMOVE NOISE / ACADEMIC FEEDS
---------------------------------------------------*/
+/* -----------------------------
+   CLEAN HEADLINE FILTER
+------------------------------*/
 
 function isCleanHeadline(h: string): boolean {
   const x = h.toLowerCase();
@@ -34,58 +34,37 @@ function isCleanHeadline(h: string): boolean {
   return !blocked.some((b) => x.includes(b));
 }
 
-/* -------------------------------------------------
-   2. IDENTITY ENGINE
---------------------------------------------------*/
+/* -----------------------------
+   REMOVE SOURCE TAGS (IMPORTANT FIX)
+------------------------------*/
 
-function buildIdentityLine(userName?: string | null) {
-  const identity = getBriefIdentity(userName);
+function compressHeadline(h: string): string {
+  return h
+    .replace(/-.*$/, "") // removes "- SourceName"
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-  const fallbackNames = [
+/* -----------------------------
+   IDENTITY
+------------------------------*/
+
+function buildIdentity(userName?: string | null) {
+  const base = getBriefIdentity(userName);
+
+  const fallback = [
     "ScrollSeer",
-    "StoryDrifter",
     "NewsNomad",
     "PulseWalker",
-    "SignalRider",
-    "ChronoScout",
+    "StoryDrifter",
   ];
 
-  return identity || fallbackNames[Math.floor(Math.random() * fallbackNames.length)];
+  return base || fallback[Math.floor(Math.random() * fallback.length)];
 }
 
-/* -------------------------------------------------
-   3. HUMOUR ENGINE (NEW CORE LAYER)
---------------------------------------------------*/
-
-function addWit(text: string): string {
-  const t = text.toLowerCase();
-
-  if (t.includes("power") || t.includes("grid")) {
-    return text + " (the grid briefly went offline for its usual identity crisis)";
-  }
-
-  if (t.includes("fuel") || t.includes("queue")) {
-    return text + " (fuel queues made a surprise return like an unwanted sequel)";
-  }
-
-  if (t.includes("market") || t.includes("stocks")) {
-    return text + " (markets are emotionally reacting again — as usual)";
-  }
-
-  if (t.includes("football") || t.includes("match") || t.includes("goal")) {
-    return text + " (football drama escalated as expected, sanity optional)";
-  }
-
-  if (t.includes("rain") || t.includes("weather")) {
-    return text + " (weather ignored all previous human plans)";
-  }
-
-  return text;
-}
-
-/* -------------------------------------------------
-   4. OPENING (MATCHES YOUR STYLE)
---------------------------------------------------*/
+/* -----------------------------
+   OPENING
+------------------------------*/
 
 function buildOpening(identity: string, country?: string) {
   const base =
@@ -96,61 +75,44 @@ function buildOpening(identity: string, country?: string) {
   return `Hi ${identity}, ${base} five headline stories shaped today’s mood.`;
 }
 
-/* -------------------------------------------------
-   5. STORY BUILDER (HUMAN + WIT + FLOW)
---------------------------------------------------*/
+/* -----------------------------
+   STORY BUILDER
+------------------------------*/
 
-function buildStory(headlines: string[], country?: string) {
+function buildStory(headlines: string[], country?: string, identity?: string) {
   const top = headlines.slice(0, 5);
 
-  const intro = buildOpening(buildIdentityLine(), country);
+  const intro = buildOpening(identity || "Reader", country);
 
   const hooks = ["First,", "Second,", "Third,", "Fourth,", "Finally,"];
 
   const body = top.map((h, i) => {
-    const clean = h
-      .replace(/\s+/g, " ")
-      .replace(/\.$/, "")
-      .trim();
+    const clean = compressHeadline(h);
 
-    const witty = addWit(clean);
-
-    return `${hooks[i] || "Next,"} ${witty} shaped part of today’s unfolding narrative.`;
+    return `${hooks[i]} ${clean} shaped part of today’s unfolding narrative.`;
   });
 
   const conclusion =
-    "In the end, today didn’t just deliver news — it behaved like a connected storyline unfolding in real time.";
+    "In the end, today didn’t just deliver news — it became a connected story unfolding in real time.";
 
-  return {
-    intro,
-    body,
-    conclusion,
-  };
+  return { intro, body, conclusion };
 }
 
-/* -------------------------------------------------
-   6. COUNTRY CONTEXT
---------------------------------------------------*/
+/* -----------------------------
+   COUNTRY CONTEXT
+------------------------------*/
 
 function buildCountryContext(country?: string) {
   if (!country || country === "GLOBAL") {
     return "This briefing connects local developments with broader global momentum.";
   }
 
-  return `This briefing is grounded in ${country}, while still reflecting global pressure shaping local outcomes.`;
+  return `This briefing is grounded in ${country}, shaped by global pressures influencing local outcomes.`;
 }
 
-/* -------------------------------------------------
-   7. FALLBACK (SAFE MODE)
---------------------------------------------------*/
-
-function fallback(headlines: string[]) {
-  return headlines.filter(Boolean).slice(0, 5);
-}
-
-/* -------------------------------------------------
-   8. CACHE EXTRACTION
---------------------------------------------------*/
+/* -----------------------------
+   CACHE
+------------------------------*/
 
 function extractCachedSummaries(limit = 5): string[] {
   const cache = loadSummaryCache();
@@ -165,30 +127,35 @@ function extractCachedSummaries(limit = 5): string[] {
   return collected.slice(0, limit);
 }
 
-/* -------------------------------------------------
-   9. MAIN ENGINE (FINAL OUTPUT)
---------------------------------------------------*/
+/* -----------------------------
+   FALLBACK
+------------------------------*/
+
+function fallback(headlines: string[]) {
+  return headlines.filter(Boolean).slice(0, 5);
+}
+
+/* -----------------------------
+   MAIN ENGINE
+------------------------------*/
 
 export function buildBriefing(input: BriefingInput) {
-  const cleanHeadlines = input.headlines.filter(isCleanHeadline);
+  const clean = input.headlines.filter(isCleanHeadline);
 
-  const source =
-    cleanHeadlines.length > 0 ? cleanHeadlines : fallback(input.headlines);
+  const source = clean.length > 0 ? clean : fallback(input.headlines);
 
   const cached = extractCachedSummaries(5);
 
-  const finalSource = cached.length > 0 ? cached : source;
+  const final = cached.length > 0 ? cached : source;
 
-  const identity = buildIdentityLine(input.userName);
+  const identity = buildIdentity(input.userName);
 
-  const story = buildStory(finalSource, input.country);
-
-  const countryContext = buildCountryContext(input.country);
+  const story = buildStory(final, input.country, identity);
 
   return {
     identity,
     opening: story.intro,
-    countryContext,
+    countryContext: buildCountryContext(input.country),
     sections: story.body,
     lines: story.body,
     conclusion: story.conclusion,
