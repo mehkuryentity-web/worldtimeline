@@ -19,7 +19,7 @@ import {
 
 import { findCountry } from "@/lib/countries";
 import { useAppState } from "@/hooks/use-app-state";
-import { Loader2, Timer } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 import { fetchPreloadedSummaries } from "@/lib/news.functions";
 import { enqueueArticles } from "@/lib/intelligence/preloadEngine";
@@ -65,14 +65,11 @@ const normalizeCategory = (cat: string): Category => {
 
 function Home() {
   const [category, setCategory] = useState<Category>("Top");
-
   const { state, award, update } = useAppState();
 
   const [country, setCountryState] = useState<string>(
     () => state.country ?? "GLOBAL"
   );
-
-  const [refreshMs, setRefreshMs] = useState<number>(5 * 60 * 1000);
 
   const preloadedBatchesRef = useRef<Set<string>>(new Set());
 
@@ -87,11 +84,14 @@ function Home() {
     award("open_app");
   }, []);
 
-  const { data, isLoading, error, refetch, isFetching } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["news", country, category],
     queryFn: () => fetchNews(category, country),
-    refetchInterval: refreshMs > 0 ? refreshMs : false,
-    staleTime: 5 * 60 * 1000,
+
+    // ❌ TIME SELECTOR REMOVED
+    refetchInterval: false,
+
+    staleTime: 0,
   });
 
   const apiItems: NewsItem[] = (data?.items ?? []).map((n) => ({
@@ -120,18 +120,12 @@ function Home() {
       image: p.media?.find((m) => m.type === "image")?.dataUrl,
     }));
 
+  // PURE FEED (NO TIME FILTERING)
   const allItems: NewsItem[] = [...userItems, ...apiItems].sort(
     (a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt)
   );
 
-  const now = Date.now();
-
-  const items =
-    refreshMs > 0
-      ? allItems.filter(
-          (i) => now - +new Date(i.publishedAt) <= refreshMs
-        )
-      : allItems;
+  const items = allItems;
 
   useEffect(() => {
     if (allItems.length) {
@@ -139,15 +133,9 @@ function Home() {
     }
   }, [data?.fetchedAt, state.userPosts.length]);
 
-  /*
-   * =========================================================
-   * STEP 5 FIX: BACKGROUND PRELOAD TRIGGER (CORE FIX)
-   * =========================================================
-   */
   useEffect(() => {
     if (!items.length) return;
 
-    // 1. PRELOAD EDGE SUMMARIES (BATCHED)
     const batch = items.slice(0, 12);
     const batchKey = batch.map((b) => b.id).join(",");
 
@@ -166,28 +154,9 @@ function Home() {
         published: item.publishedAt,
       }));
 
-      fetchPreloadedSummaries(formatted)
-        .then((res) => {
-          if (!res) return;
-
-          const CACHE_KEY = "wt:ai-summary:v2";
-
-          try {
-            const existing = localStorage.getItem(CACHE_KEY);
-            const map = existing ? JSON.parse(existing) : {};
-
-            Object.entries(res).forEach(([id, value]) => {
-              map[id] = value;
-            });
-
-            localStorage.setItem(CACHE_KEY, JSON.stringify(map));
-          } catch {}
-        })
-        .catch(() => {});
+      fetchPreloadedSummaries(formatted).catch(() => {});
+      enqueueArticles(items.slice(0, 12));
     }
-
-    // 2. PRELOAD INTELLIGENCE ENGINE (NEW V2 LAYER)
-    enqueueArticles(items.slice(0, 12));
   }, [items]);
 
   return (
@@ -201,21 +170,6 @@ function Home() {
 
         <div className="flex items-center justify-between gap-2">
           <CountrySelector value={country} onChange={setCountry} />
-
-          <div className="flex items-center gap-2">
-            <Timer className="h-3 w-3" />
-            <select
-              value={refreshMs}
-              onChange={(e) => setRefreshMs(Number(e.target.value))}
-              className="text-xs border rounded px-2 py-1"
-            >
-              <option value={300000}>5 min</option>
-              <option value={600000}>10 min</option>
-              <option value={1800000}>30 min</option>
-              <option value={3600000}>1 hour</option>
-              <option value={0}>Off</option>
-            </select>
-          </div>
         </div>
 
         <CategoryTabs value={category} onChange={setCategory} />
@@ -228,12 +182,6 @@ function Home() {
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" />
             Loading feed...
-          </div>
-        )}
-
-        {(error as any) && (
-          <div className="text-xs text-red-500">
-            Failed to load news
           </div>
         )}
 
