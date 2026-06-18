@@ -7,39 +7,150 @@ export interface BriefingInput {
   country?: string;
 }
 
-/* -----------------------------
-   CLEAN CLASSIFIER (lightweight grouping)
-------------------------------*/
+/* -------------------------------------------------
+   1. HARD FILTER — REMOVE NOISE / ACADEMIC FEEDS
+--------------------------------------------------*/
 
-function classify(headline: string): string {
-  const h = headline.toLowerCase();
+function isCleanHeadline(h: string): boolean {
+  const x = h.toLowerCase();
 
-  if (h.includes("market") || h.includes("economy") || h.includes("oil") || h.includes("bank")) {
-    return "Markets & Economy";
-  }
+  const blocked = [
+    "frontiers",
+    "arxiv",
+    "doi",
+    "css",
+    "javascript",
+    "react",
+    "tutorial",
+    "conference",
+    "abstract",
+    "paper",
+    "study",
+    "journal",
+    "volume",
+    "issue",
+  ];
 
-  if (h.includes("election") || h.includes("government") || h.includes("policy") || h.includes("senate")) {
-    return "Politics & Governance";
-  }
-
-  if (h.includes("tech") || h.includes("ai") || h.includes("software") || h.includes("apple") || h.includes("google")) {
-    return "Technology";
-  }
-
-  if (h.includes("war") || h.includes("conflict") || h.includes("ceasefire") || h.includes("security")) {
-    return "Geopolitics & Security";
-  }
-
-  if (h.includes("climate") || h.includes("weather") || h.includes("cop")) {
-    return "Climate & Environment";
-  }
-
-  return "General Updates";
+  return !blocked.some((b) => x.includes(b));
 }
 
-/* -----------------------------
-   CACHE EXTRACTION
-------------------------------*/
+/* -------------------------------------------------
+   2. IDENTITY ENGINE
+--------------------------------------------------*/
+
+function buildIdentityLine(userName?: string | null) {
+  const identity = getBriefIdentity(userName);
+
+  const fallbackNames = [
+    "ScrollSeer",
+    "StoryDrifter",
+    "NewsNomad",
+    "PulseWalker",
+    "SignalRider",
+    "ChronoScout",
+  ];
+
+  return identity || fallbackNames[Math.floor(Math.random() * fallbackNames.length)];
+}
+
+/* -------------------------------------------------
+   3. HUMOUR ENGINE (NEW CORE LAYER)
+--------------------------------------------------*/
+
+function addWit(text: string): string {
+  const t = text.toLowerCase();
+
+  if (t.includes("power") || t.includes("grid")) {
+    return text + " (the grid briefly went offline for its usual identity crisis)";
+  }
+
+  if (t.includes("fuel") || t.includes("queue")) {
+    return text + " (fuel queues made a surprise return like an unwanted sequel)";
+  }
+
+  if (t.includes("market") || t.includes("stocks")) {
+    return text + " (markets are emotionally reacting again — as usual)";
+  }
+
+  if (t.includes("football") || t.includes("match") || t.includes("goal")) {
+    return text + " (football drama escalated as expected, sanity optional)";
+  }
+
+  if (t.includes("rain") || t.includes("weather")) {
+    return text + " (weather ignored all previous human plans)";
+  }
+
+  return text;
+}
+
+/* -------------------------------------------------
+   4. OPENING (MATCHES YOUR STYLE)
+--------------------------------------------------*/
+
+function buildOpening(identity: string, country?: string) {
+  const base =
+    country && country !== "GLOBAL"
+      ? `${country} woke up to a mixed bag of chaos and charm today as`
+      : `The world woke up to a mixed bag of chaos and charm today as`;
+
+  return `Hi ${identity}, ${base} five headline stories shaped today’s mood.`;
+}
+
+/* -------------------------------------------------
+   5. STORY BUILDER (HUMAN + WIT + FLOW)
+--------------------------------------------------*/
+
+function buildStory(headlines: string[], country?: string) {
+  const top = headlines.slice(0, 5);
+
+  const intro = buildOpening(buildIdentityLine(), country);
+
+  const hooks = ["First,", "Second,", "Third,", "Fourth,", "Finally,"];
+
+  const body = top.map((h, i) => {
+    const clean = h
+      .replace(/\s+/g, " ")
+      .replace(/\.$/, "")
+      .trim();
+
+    const witty = addWit(clean);
+
+    return `${hooks[i] || "Next,"} ${witty} shaped part of today’s unfolding narrative.`;
+  });
+
+  const conclusion =
+    "In the end, today didn’t just deliver news — it behaved like a connected storyline unfolding in real time.";
+
+  return {
+    intro,
+    body,
+    conclusion,
+  };
+}
+
+/* -------------------------------------------------
+   6. COUNTRY CONTEXT
+--------------------------------------------------*/
+
+function buildCountryContext(country?: string) {
+  if (!country || country === "GLOBAL") {
+    return "This briefing connects local developments with broader global momentum.";
+  }
+
+  return `This briefing is grounded in ${country}, while still reflecting global pressure shaping local outcomes.`;
+}
+
+/* -------------------------------------------------
+   7. FALLBACK (SAFE MODE)
+--------------------------------------------------*/
+
+function fallback(headlines: string[]) {
+  return headlines.filter(Boolean).slice(0, 5);
+}
+
+/* -------------------------------------------------
+   8. CACHE EXTRACTION
+--------------------------------------------------*/
 
 function extractCachedSummaries(limit = 5): string[] {
   const cache = loadSummaryCache();
@@ -54,116 +165,32 @@ function extractCachedSummaries(limit = 5): string[] {
   return collected.slice(0, limit);
 }
 
-/* -----------------------------
-   COUNTRY CONTEXT
-------------------------------*/
-
-function buildCountryContext(country?: string) {
-  if (!country || country === "GLOBAL") {
-    return "Coverage spans global developments across multiple regions.";
-  }
-
-  return `Coverage includes developments relevant to ${country}, connected to wider global shifts.`;
-}
-
-/* -----------------------------
-   OPENING GENERATOR (CLEAN + NO DUPLICATION)
-------------------------------*/
-
-function buildOpening(identity: string) {
-  const openings = [
-    "Today’s news is moving across multiple pressure points at once.",
-    "Today’s briefing captures fast-moving developments across sectors.",
-    "Today’s developments show interconnected shifts across politics, markets, and society.",
-    "Today’s news reflects overlapping changes shaping the global cycle.",
-  ];
-
-  const pick = openings[Math.floor(Math.random() * openings.length)];
-
-  return `Hi ${identity}, ${pick}`;
-}
-
-/* -----------------------------
-   CONCLUSION ENGINE (STRUCTURAL SUMMARY)
-------------------------------*/
-
-function buildConclusion(headlines: string[], country?: string) {
-  const text = headlines.join(" ").toLowerCase();
-
-  let tone = "steady but evolving";
-
-  if (text.includes("war") || text.includes("conflict") || text.includes("attack")) {
-    tone = "marked by rising geopolitical tension";
-  }
-
-  if (text.includes("market") || text.includes("economy") || text.includes("inflation")) {
-    tone = "driven by financial recalibration";
-  }
-
-  if (text.includes("ai") || text.includes("tech") || text.includes("software")) {
-    tone = "shaped by rapid technological acceleration";
-  }
-
-  if (country && country !== "GLOBAL") {
-    return `Overall, ${country}'s news landscape is ${tone}, tightly linked to global momentum.`;
-  }
-
-  return `Overall, global developments remain ${tone}, with cross-regional effects reinforcing each other.`;
-}
-
-/* -----------------------------
-   FALLBACK (NO JUNK SENTENCES)
-------------------------------*/
-
-function fallback(headlines: string[]) {
-  return headlines.slice(0, 5);
-}
-
-/* -----------------------------
-   CLUSTERING
-------------------------------*/
-
-function cluster(headlines: string[]) {
-  const map: Record<string, string[]> = {};
-
-  for (const h of headlines) {
-    const key = classify(h);
-    if (!map[key]) map[key] = [];
-    map[key].push(h);
-  }
-
-  return map;
-}
-
-/* -----------------------------
-   MAIN ENGINE
-------------------------------*/
+/* -------------------------------------------------
+   9. MAIN ENGINE (FINAL OUTPUT)
+--------------------------------------------------*/
 
 export function buildBriefing(input: BriefingInput) {
-  const identity = getBriefIdentity(input.userName);
+  const cleanHeadlines = input.headlines.filter(isCleanHeadline);
+
+  const source =
+    cleanHeadlines.length > 0 ? cleanHeadlines : fallback(input.headlines);
 
   const cached = extractCachedSummaries(5);
-  const source = cached.length > 0 ? cached : fallback(input.headlines);
 
-  const clusters = cluster(input.headlines);
+  const finalSource = cached.length > 0 ? cached : source;
+
+  const identity = buildIdentityLine(input.userName);
+
+  const story = buildStory(finalSource, input.country);
 
   const countryContext = buildCountryContext(input.country);
 
-  const opening = buildOpening(identity);
-
-  const sections: string[] = [];
-
-  for (const [key, items] of Object.entries(clusters)) {
-    const summary = items.slice(0, 2).join(" • ");
-    sections.push(`${key}: ${summary}`);
-  }
-
   return {
     identity,
-    opening,
+    opening: story.intro,
     countryContext,
-    sections: sections.slice(0, 4),
-    lines: source.slice(0, 5),
-    conclusion: buildConclusion(input.headlines, input.country),
+    sections: story.body,
+    lines: story.body,
+    conclusion: story.conclusion,
   };
 }
