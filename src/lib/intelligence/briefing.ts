@@ -7,56 +7,43 @@ export interface BriefingInput {
 }
 
 /* ---------------------------------------
-   IDENTITY (FINAL RULE — NO OVERRIDE BUGS)
+   IDENTITY (FINAL LOCK)
 ----------------------------------------*/
 
 function resolveIdentity(userName?: string | null) {
-  // FINAL RULE:
-  // If user is logged in → ALWAYS use real name
-  // Only fallback when empty/null/undefined
-
-  if (userName && userName.trim().length > 0) {
-    return userName.trim();
-  }
-
-  return getBriefIdentity(userName);
+  return userName && userName.trim().length > 0
+    ? userName.trim()
+    : getBriefIdentity(userName);
 }
 
 /* ---------------------------------------
-   CLEAN HEADLINE INPUT
+   CLEAN INPUT
 ----------------------------------------*/
 
 function clean(h: string) {
-  return h
-    .replace(/—.*$/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return h.replace(/—.*$/g, "").replace(/\s+/g, " ").trim();
 }
 
 /* ---------------------------------------
-   REAL EDITORIAL REWRITE ENGINE
-   (THIS IS THE CORE FIX)
+   STORY REWRITE (REAL EDITORIAL VOICE)
 ----------------------------------------*/
 
-function rewrite(h: string): string {
+function rewrite(h: string) {
   const base = clean(h);
 
-  // Remove source-like framing
-  const stripped = base
-    .replace(/^\w+\s+:\s*/g, "")
-    .replace(/\|.*$/g, "");
+  // strip prefixes like Nigeria:, FG:, etc.
+  const stripped = base.replace(/^\w+:\s*/g, "");
 
-  // Editorial compression rules (NOT keyword spam)
-  if (stripped.length < 60) {
-    return `${stripped} is drawing attention as details continue to emerge`;
+  // editorial compression (natural newsroom tone)
+  if (stripped.length < 70) {
+    return `${stripped} is drawing attention as developments continue to unfold`;
   }
 
-  // Default newsroom rewrite: compress + reframe meaning
-  return `${stripped} is now part of a broader set of developments unfolding across related sectors`;
+  return `${stripped} is emerging as part of a wider sequence of developments`;
 }
 
 /* ---------------------------------------
-   TRANSITIONS (LIGHT, NATURAL FLOW ONLY)
+   TRANSITIONS (LIGHT, HUMAN FLOW)
 ----------------------------------------*/
 
 const transitions = [
@@ -64,116 +51,70 @@ const transitions = [
   "At the same time,",
   "Elsewhere,",
   "In another development,",
-  "Across another line of reporting,",
 ];
 
 /* ---------------------------------------
-   NEWSROOM PARAGRAPH BUILDER
+   OPENING (DYNAMIC EDITORIAL HOOK)
+----------------------------------------*/
+
+function buildOpening(name: string, country?: string) {
+  const region = country && country !== "GLOBAL" ? country : "global";
+
+  const hooks = [
+    "today opens with overlapping developments shaping the news cycle",
+    "today begins with multiple stories moving in different directions",
+    "today unfolds through a mix of political, economic and social signals",
+    "today starts with interconnected events forming a fast-moving cycle",
+  ];
+
+  const hook = hooks[Math.floor(Math.random() * hooks.length)];
+
+  return `Hi ${name}, ${region} ${hook}.`;
+}
+
+/* ---------------------------------------
+   PARAGRAPH BUILDER (5 STORIES, ONE FLOW)
 ----------------------------------------*/
 
 function buildParagraph(headlines: string[]) {
-  const top = headlines.slice(0, 5);
+  return headlines.slice(0, 5).map((h, i) => {
+    const story = rewrite(h);
 
-  return top
-    .map((h, i) => {
-      const story = rewrite(h);
+    if (i === 0) return story;
 
-      if (i === 0) return story;
-
-      const t = transitions[Math.floor(Math.random() * transitions.length)];
-
-      return `${t} ${story}`;
-    })
-    .join(". ");
+    const t = transitions[Math.floor(Math.random() * transitions.length)];
+    return `${t} ${story}`;
+  }).join(" ");
 }
 
 /* ---------------------------------------
-   TRUE THEME DETECTION (WEIGHTED, NOT KEYWORD GUESSING)
+   THEME DETECTION (SIMPLE + RELIABLE)
 ----------------------------------------*/
 
-function detectThemes(headlines: string[]) {
+function detectTheme(headlines: string[]) {
   const text = headlines.join(" ").toLowerCase();
 
-  const themes: string[] = [];
+  if (text.includes("war") || text.includes("conflict") || text.includes("security"))
+    return "geopolitical tension";
 
-  // weighted signals (not binary keyword traps)
-  const techScore =
-    (text.match(/ai|tech|software|app|digital/g) || []).length;
+  if (text.includes("inflation") || text.includes("market") || text.includes("economy"))
+    return "economic pressure";
 
-  const politicsScore =
-    (text.match(/government|election|minister|policy/g) || []).length;
+  if (text.includes("health") || text.includes("hospital") || text.includes("cancer"))
+    return "public health strain";
 
-  const economyScore =
-    (text.match(/market|economy|bank|finance|stock/g) || []).length;
+  if (text.includes("tech") || text.includes("ai"))
+    return "technological acceleration";
 
-  const cultureScore =
-    (text.match(/music|film|tv|festival|celebrity/g) || []).length;
-
-  const securityScore =
-    (text.match(/war|conflict|security|attack/g) || []).length;
-
-  const scored = [
-    { t: "technology acceleration", s: techScore },
-    { t: "political developments", s: politicsScore },
-    { t: "economic movement", s: economyScore },
-    { t: "cultural and entertainment activity", s: cultureScore },
-    { t: "geopolitical tension", s: securityScore },
-  ];
-
-  scored.sort((a, b) => b.s - a.s);
-
-  const top = scored.filter((x) => x.s > 0).slice(0, 2).map((x) => x.t);
-
-  return top.length ? top : ["mixed sector activity"];
+  return "mixed sector activity";
 }
 
 /* ---------------------------------------
-   DYNAMIC OPENING (NO STATIC TEMPLATES)
+   CONCLUSION (NO TEMPLATE PHRASES)
 ----------------------------------------*/
 
-function buildOpening(name: string, country?: string, themes?: string[]) {
-  const region = country && country !== "GLOBAL" ? country : "global";
-
-  const tones = [
-    "opens with overlapping developments moving in different directions",
-    "begins with a mix of shifting signals across multiple sectors",
-    "starts with fragmented but connected activity shaping the tone of the day",
-    "unfolds through multiple streams of unrelated but intersecting events",
-  ];
-
-  const tone = tones[Math.floor(Math.random() * tones.length)];
-
-  const themeText = themes?.length
-    ? themes.join(", ")
-    : "diverse global developments";
-
-  return `Hi ${name}, ${region} today ${tone}, driven by ${themeText}.`;
-}
-
-/* ---------------------------------------
-   CONCLUSION (GROUND-TRUTH BASED)
-----------------------------------------*/
-
-function buildConclusion(headlines: string[], themes: string[]) {
-  const text = headlines.join(" ").toLowerCase();
-
-  let tone = "mixed directional movement";
-
-  if (text.includes("war") || text.includes("conflict"))
-    tone = "rising geopolitical pressure";
-
-  if (text.includes("economy") || text.includes("market"))
-    tone = "economic adjustment and repositioning";
-
-  if (text.includes("tech"))
-    tone = "accelerating technological change";
-
-  const themeLine =
-    themes.length > 1
-      ? `Key threads include ${themes.join(" and ")}.`
-      : `Primary thread centers on ${themes[0]}.`;
-
-  return `Overall, today reflects ${tone}. ${themeLine} Nothing resolves cleanly — the cycle continues to adjust in real time.`;
+function buildConclusion(headlines: string[], theme: string) {
+  return `Overall, today reflects ${theme}. The cycle remains active with no single direction dominating the narrative.`;
 }
 
 /* ---------------------------------------
@@ -182,13 +123,12 @@ function buildConclusion(headlines: string[], themes: string[]) {
 
 export function buildBriefing(input: BriefingInput) {
   const identity = resolveIdentity(input.userName);
-
-  const themes = detectThemes(input.headlines);
+  const theme = detectTheme(input.headlines || []);
 
   return {
     identity,
-    opening: buildOpening(identity, input.country, themes),
-    newsroomParagraph: buildParagraph(input.headlines),
-    conclusion: buildConclusion(input.headlines, themes),
+    opening: buildOpening(identity, input.country),
+    newsroomParagraph: buildParagraph(input.headlines || []),
+    conclusion: buildConclusion(input.headlines || [], theme),
   };
 }
