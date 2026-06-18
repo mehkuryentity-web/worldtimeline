@@ -1,112 +1,100 @@
 import { useEffect, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
+import { generateBriefing } from "@/lib/news.functions";
 import { buildBriefing } from "@/lib/intelligence/briefing";
 import { useAppState } from "@/hooks/use-app-state";
 
 interface Props {
   headlines: string[];
-  country?: string;
 }
 
-export function AISummaryCard({ headlines, country }: Props) {
+export function AISummaryCard({ headlines }: Props) {
   const { state } = useAppState();
+
+  const [summary, setSummary] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [time, setTime] = useState(300); // 5 min countdown
+  const [manualRefresh, setManualRefresh] = useState(0);
 
   const userName = state?.user?.name ?? null;
 
-  const [briefing, setBriefing] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-
-  // 5-minute cycle controller
-  const [secondsLeft, setSecondsLeft] = useState(300);
-  const [version, setVersion] = useState(0);
-
-  /* -----------------------------
-     BUILD BRIEFING
-  ------------------------------*/
-  const build = () => {
+  async function load() {
     setLoading(true);
 
-    const result = buildBriefing({
-      headlines,
-      userName,
-      country,
-    });
+    try {
+      // metadata only (no narrative role anymore)
+      buildBriefing({
+        headlines,
+        userName,
+        country: "GLOBAL",
+      });
 
-    setBriefing(result);
-    setLoading(false);
-  };
+      // REAL NARRATIVE COMES FROM GEMINI
+      const result = await generateBriefing({ headlines });
 
-  /* -----------------------------
-     REBUILD ON CHANGE
-  ------------------------------*/
+      setSummary(result.summary);
+    } catch (e) {
+      console.error("Briefing failed:", e);
+      setSummary("Live briefing temporarily unavailable.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // initial + refresh trigger
   useEffect(() => {
-    build();
-  }, [version, headlines, userName, country]);
+    load();
+  }, [headlines, manualRefresh]);
 
-  /* -----------------------------
-     5-MINUTE COUNTDOWN + AUTO REFRESH
-  ------------------------------*/
+  // countdown timer (5 min)
   useEffect(() => {
-    const timer = setInterval(() => {
-      setSecondsLeft((prev) => {
-        if (prev <= 1) {
-          setVersion((v) => v + 1); // auto refresh
+    const interval = setInterval(() => {
+      setTime((t) => {
+        if (t <= 1) {
+          load();
           return 300;
         }
-        return prev - 1;
+        return t - 1;
       });
     }, 1000);
 
-    return () => clearInterval(timer);
+    return () => clearInterval(interval);
   }, []);
 
-  const manualRefresh = () => {
-    setVersion((v) => v + 1);
-    setSecondsLeft(300);
-  };
+  function refreshNow() {
+    setTime(300);
+    setManualRefresh((v) => v + 1);
+  }
 
-  const mm = String(Math.floor(secondsLeft / 60)).padStart(2, "0");
-  const ss = String(secondsLeft % 60).padStart(2, "0");
+  const formatTime = (s: number) =>
+    `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
   return (
     <div className="rounded-xl border border-border bg-surface-1 p-4 space-y-3">
-
-      {/* HEADER */}
+      {/* header */}
       <div className="flex items-center justify-between">
         <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-          AI Briefing · {mm}:{ss}
+          AI Briefing · {formatTime(time)}
         </div>
 
         <button
-          onClick={manualRefresh}
-          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          onClick={refreshNow}
+          className="text-xs flex items-center gap-1 text-muted-foreground hover:text-foreground"
         >
           <RefreshCw className="h-3 w-3" />
+          Refresh
         </button>
       </div>
 
-      {/* BODY */}
-      {loading || !briefing ? (
+      {/* content */}
+      {loading ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin" />
-          Composing briefing...
+          Composing live briefing...
         </div>
       ) : (
-        <div className="space-y-3 text-sm leading-relaxed text-foreground/90">
-
-          {/* OPENING */}
-          <p className="font-medium">{briefing.opening}</p>
-
-          {/* SINGLE NEWSROOM PARAGRAPH (NO MAP ANYMORE) */}
-          <p>
-            {briefing.newsroomParagraph}
-          </p>
-
-          {/* CONCLUSION */}
-          <p className="font-semibold border-t border-border pt-2">
-            {briefing.conclusion}
-          </p>
-
+        <div className="text-sm leading-relaxed text-foreground/90">
+          <p>{summary}</p>
         </div>
       )}
     </div>
