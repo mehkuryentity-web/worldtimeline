@@ -14,7 +14,7 @@ export interface ApiNewsItem {
 }
 
 /* ---------------------------------------
-   FETCH LIVE NEWS (UNCHANGED CORE)
+   FETCH LIVE NEWS
 ----------------------------------------*/
 
 export const fetchLiveNews = async (data: {
@@ -46,11 +46,12 @@ export const fetchLiveNews = async (data: {
 };
 
 /* ---------------------------------------
-   GEMINI BRIEFING (FINAL NEWSROOM + WIT)
+   GEMINI BRIEFING (FINAL LOCKED VERSION)
 ----------------------------------------*/
 
 export const generateBriefing = async (data: {
   headlines: string[];
+  userName?: string | null;
 }): Promise<{ summary: string; error?: string }> => {
   if (!data?.headlines?.length) {
     return { summary: "Waiting for live newsroom signals..." };
@@ -76,42 +77,44 @@ export const generateBriefing = async (data: {
       return { summary: "No live signals available." };
     }
 
-    /* ---------------------------------------
-       FINAL CONTROLLED NEWSROOM PROMPT
-    ----------------------------------------*/
+    // STRICT identity rule: NEVER invent names
+    const userName =
+      typeof data.userName === "string" && data.userName.trim().length > 0
+        ? data.userName.trim()
+        : null;
 
     const promptText = `
-You are a live newsroom editor writing a real-time briefing.
+You are a live newsroom editor writing a real-time news briefing.
 
-CORE OUTPUT RULE:
-Write ONE flowing paragraph only.
+OUTPUT STRUCTURE (MANDATORY):
+1. Greeting line
+2. ONE flowing newsroom paragraph
+3. ONE short witty closing line
+
+IDENTITY RULE:
+- If a user name exists, use "Hi [Name],"
+- If no user name exists, use "Hi,"
 
 STYLE:
-- Fast-paced newsroom wire style (BBC / Reuters feel)
-- Subtle, restrained wit allowed (dry newsroom irony)
-- Light observational tone, not comedic
-- Occasional transitions like "Meanwhile", "At the same time", "Elsewhere"
-- Natural flow, not list-based
+- Fast-paced newsroom wire tone (BBC / Reuters feel)
+- Subtle dry wit allowed (restrained, not comedic)
+- Clean transitions like "Meanwhile", "At the same time", "Elsewhere"
+- Neutral, factual narration
 
 STRICT RULES:
-- No bullet points or headers
-- No moral commentary or philosophical reflection
-- No “spectrum of human experience” framing
-- No quizzes, entertainment filler unless major headline
-- Do NOT summarize each headline individually
-- Do NOT repeat sentence structures
-- Avoid exaggerated emotional language
+- One paragraph only for the main body
+- No bullet points, no lists
+- No moral commentary
+- No emotional storytelling
+- No summarizing each headline individually
+- No invented identities or assumptions
 
 WIT RULES:
-- Wit must be subtle and dry (like a tired newsroom editor)
-- No jokes, no sarcasm bursts, no comedy tone
-- Light irony is allowed only when it feels natural
+- Closing line must be short, slightly sharp, editorial in tone
+- No jokes, no slang, no exaggeration
 
 INPUT HEADLINES:
 ${cleanHeadlines.join("\n")}
-
-OUTPUT:
-One coherent newsroom paragraph only.
 `;
 
     const res = await fetch(url, {
@@ -132,10 +135,28 @@ One coherent newsroom paragraph only.
 
     const json = await res.json();
 
-    const summary =
+    let summary =
       json?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
 
     if (!summary) throw new Error("Empty Gemini response");
+
+    /* ---------------------------------------
+       SAFETY ENFORCEMENT (FINAL GUARD RAILS)
+    ----------------------------------------*/
+
+    // Ensure greeting is correct and NEVER fake identity
+    if (!summary.startsWith("Hi")) {
+      summary = userName
+        ? `Hi ${userName}, ${summary}`
+        : `Hi, ${summary}`;
+    }
+
+    // Ensure closing line exists
+    const lines = summary.split("\n").filter(Boolean);
+
+    if (lines.length < 2) {
+      summary += `\nToday continues, even when reporting pauses.`;
+    }
 
     return { summary };
   } catch (e) {
@@ -143,67 +164,10 @@ One coherent newsroom paragraph only.
 
     return {
       summary:
-        "Live briefing temporarily unavailable while signals stabilize.",
+        data.userName
+          ? `Hi ${data.userName}, live briefing is temporarily unavailable.\nToday continues, even when systems pause.`
+          : `Hi, live briefing is temporarily unavailable.\nToday continues, even when systems pause.`,
       error: e instanceof Error ? e.message : "UNKNOWN_ERROR",
     };
-  }
-};
-
-/* ---------------------------------------
-   PRELOADED SUMMARIES (UNCHANGED)
-----------------------------------------*/
-
-export const fetchPreloadedSummaries = async (
-  items: ApiNewsItem[]
-): Promise<Record<string, string>> => {
-  if (!items?.length) return {};
-
-  try {
-    const url =
-      "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/article-summary";
-
-    const SUPABASE_KEY =
-      (import.meta.env && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) ||
-      (window as any)._env_?.VITE_SUPABASE_PUBLISHABLE_KEY ||
-      "";
-
-    if (!SUPABASE_KEY) {
-      console.error("Missing Supabase key.");
-      return {};
-    }
-
-    const normalizedItems = items.map((item) => ({
-      id: item.id,
-      title: item.title || "Untitled",
-      description:
-        item.summary || item.description || "No description available.",
-      url: item.url || "https://worldtimeline.co",
-      author: item.source || item.author || "Global Feed",
-      image: item.image || "",
-      language: item.language || "en",
-      category: Array.isArray(item.category)
-        ? item.category
-        : [item.category || "Top"],
-      published:
-        item.publishedAt || item.published || new Date().toISOString(),
-    }));
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-      },
-      body: JSON.stringify({ articles: normalizedItems }),
-    });
-
-    if (!response.ok) return {};
-
-    const data = await response.json();
-
-    return data.summaries || {};
-  } catch (e) {
-    console.error("Preload summaries failed:", e);
-    return {};
   }
 };
