@@ -19,7 +19,7 @@ import {
 
 import { findCountry } from "@/lib/countries";
 import { useAppState } from "@/hooks/use-app-state";
-import { Loader2 } from "lucide-react";
+import { Loader2, Timer } from "lucide-react";
 
 import { fetchPreloadedSummaries } from "@/lib/news.functions";
 import { enqueueArticles } from "@/lib/intelligence/preloadEngine";
@@ -62,33 +62,7 @@ function Home() {
     () => state.country ?? "GLOBAL"
   );
 
-  const [mode, setMode] = useState<
-    "off" | "5m" | "10m" | "30m" | "1h" | "24h" | "custom"
-  >("off");
-
-  const [customHours, setCustomHours] = useState(0);
-  const [customMinutes, setCustomMinutes] = useState(0);
-
-  const getWindowMs = () => {
-    switch (mode) {
-      case "5m":
-        return 5 * 60 * 1000;
-      case "10m":
-        return 10 * 60 * 1000;
-      case "30m":
-        return 30 * 60 * 1000;
-      case "1h":
-        return 60 * 60 * 1000;
-      case "24h":
-        return 24 * 60 * 60 * 1000;
-      case "custom":
-        return (customHours * 60 + customMinutes) * 60 * 1000;
-      default:
-        return 0;
-    }
-  };
-
-  const refreshMs = getWindowMs();
+  const [refreshMs, setRefreshMs] = useState<number>(5 * 60 * 1000);
 
   const preloadedBatchesRef = useRef<Set<string>>(new Set());
   const countryMeta = findCountry(country);
@@ -102,11 +76,11 @@ function Home() {
     award("open_app");
   }, []);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["news", country, category],
     queryFn: () => fetchNews(category, country),
-    refetchInterval: false,
-    staleTime: 0,
+    refetchInterval: refreshMs > 0 ? refreshMs : false,
+    staleTime: 5 * 60 * 1000,
   });
 
   const apiItems: NewsItem[] = (data?.items ?? []).map((n) => ({
@@ -135,42 +109,45 @@ function Home() {
       image: p.media?.find((m) => m.type === "image")?.dataUrl,
     }));
 
-  const allItems = [...userItems, ...apiItems];
+  const allItems: NewsItem[] = [...userItems, ...apiItems];
 
   const now = Date.now();
 
-  // -----------------------------
-  // 🧠 SMART RECENCY ENGINE
-  // -----------------------------
-  const scoredItems = allItems.map((item) => {
-    const age = now - +new Date(item.publishedAt);
+  /*
+  =====================================================
+  FINAL TIME SELECTOR LOGIC (FIXED)
+  =====================================================
+  */
 
-    // freshness score (higher = newer)
-    const freshnessScore = Math.max(0, 1 - age / (24 * 60 * 60 * 1000));
+  let items: NewsItem[];
 
-    return {
-      ...item,
-      _score: freshnessScore,
-    };
-  });
+  // OFF MODE → NO FILTERING, PURE RECENCY SORT
+  if (refreshMs === 0) {
+    items = [...allItems].sort(
+      (a, b) =>
+        new Date(b.publishedAt).getTime() -
+        new Date(a.publishedAt).getTime()
+    );
+  }
 
-  let items: NewsItem[] = [];
-
-  if (mode === "off") {
-    // 🧠 SMART MODE: no filtering, just intelligent ranking
-    items = scoredItems
-      .sort((a, b) => b._score - a._score)
-      .map(({ _score, ...rest }) => rest);
-  } else {
-    // 🧹 HARD FILTER MODE (user-controlled)
-    items = scoredItems
-      .filter((i) => now - +new Date(i.publishedAt) <= refreshMs)
-      .sort((a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt))
-      .map(({ _score, ...rest }) => rest);
+  // TIME MODES → FILTER + SORT
+  else {
+    items = allItems
+      .filter((i) => {
+        const age = now - new Date(i.publishedAt).getTime();
+        return age <= refreshMs;
+      })
+      .sort(
+        (a, b) =>
+          new Date(b.publishedAt).getTime() -
+          new Date(a.publishedAt).getTime()
+      );
   }
 
   useEffect(() => {
-    if (allItems.length) cacheArticles(allItems);
+    if (allItems.length) {
+      cacheArticles(allItems);
+    }
   }, [data?.fetchedAt, state.userPosts.length]);
 
   useEffect(() => {
@@ -212,39 +189,21 @@ function Home() {
         <div className="flex items-center justify-between gap-2">
           <CountrySelector value={country} onChange={setCountry} />
 
-          <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <Timer className="h-3 w-3" />
+
             <select
-              value={mode}
-              onChange={(e) => setMode(e.target.value as any)}
+              value={refreshMs}
+              onChange={(e) => setRefreshMs(Number(e.target.value))}
               className="text-xs border rounded px-2 py-1"
             >
-              <option value="off">Smart (Off)</option>
-              <option value="5m">5 min</option>
-              <option value="10m">10 min</option>
-              <option value="30m">30 min</option>
-              <option value="1h">1 hour</option>
-              <option value="24h">24 hours</option>
-              <option value="custom">Custom</option>
+              <option value={300000}>5 min</option>
+              <option value={600000}>10 min</option>
+              <option value={1800000}>30 min</option>
+              <option value={3600000}>1 hour</option>
+              <option value={86400000}>24 hours</option>
+              <option value={0}>Off</option>
             </select>
-
-            {mode === "custom" && (
-              <div className="flex gap-1">
-                <input
-                  type="number"
-                  value={customHours}
-                  onChange={(e) => setCustomHours(Number(e.target.value))}
-                  className="w-12 text-xs border rounded px-1"
-                  placeholder="h"
-                />
-                <input
-                  type="number"
-                  value={customMinutes}
-                  onChange={(e) => setCustomMinutes(Number(e.target.value))}
-                  className="w-12 text-xs border rounded px-1"
-                  placeholder="m"
-                />
-              </div>
-            )}
           </div>
         </div>
 
@@ -259,6 +218,10 @@ function Home() {
             <Loader2 className="h-3 w-3 animate-spin" />
             Loading feed...
           </div>
+        )}
+
+        {(error as any) && (
+          <div className="text-xs text-red-500">Failed to load news</div>
         )}
 
         <div className="space-y-3">
