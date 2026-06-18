@@ -19,7 +19,7 @@ import {
 
 import { findCountry } from "@/lib/countries";
 import { useAppState } from "@/hooks/use-app-state";
-import { Loader2 } from "lucide-react";
+import { Loader2, Timer } from "lucide-react";
 
 import { fetchPreloadedSummaries } from "@/lib/news.functions";
 import { enqueueArticles } from "@/lib/intelligence/preloadEngine";
@@ -40,18 +40,9 @@ interface ApiNewsItem {
   image?: string;
 }
 
-async function fetchNews(category: Category, country: string) {
-  const res = await fetch(
-    `/api/news?category=${encodeURIComponent(category)}&country=${encodeURIComponent(country)}`
-  );
-  return res.json();
-}
-
-const normalizeCategory = (cat: string): Category => {
-  const found = CATEGORIES.find(
-    (c) => c.toLowerCase() === cat.toLowerCase()
-  );
-  return found ?? "Top";
+type CustomRange = {
+  hours: number;
+  minutes: number;
 };
 
 function Home() {
@@ -62,33 +53,15 @@ function Home() {
     () => state.country ?? "GLOBAL"
   );
 
-  const [mode, setMode] = useState<
-    "off" | "5m" | "10m" | "30m" | "1h" | "24h" | "custom"
-  >("off");
-
-  const [customHours, setCustomHours] = useState(0);
-  const [customMinutes, setCustomMinutes] = useState(0);
-
-  const getWindowMs = () => {
-    switch (mode) {
-      case "5m":
-        return 5 * 60 * 1000;
-      case "10m":
-        return 10 * 60 * 1000;
-      case "30m":
-        return 30 * 60 * 1000;
-      case "1h":
-        return 60 * 60 * 1000;
-      case "24h":
-        return 24 * 60 * 60 * 1000;
-      case "custom":
-        return (customHours * 60 + customMinutes) * 60 * 1000;
-      default:
-        return 0;
-    }
-  };
-
-  const refreshMs = getWindowMs();
+  /*
+  -----------------------------------------------------
+  TIME MODE SYSTEM
+  0 = ALL NEWS (no filter, newest → oldest)
+  number = preset window (ms)
+  object = custom window
+  -----------------------------------------------------
+  */
+  const [refreshMs, setRefreshMs] = useState<number | CustomRange>(0);
 
   const preloadedBatchesRef = useRef<Set<string>>(new Set());
   const countryMeta = findCountry(country);
@@ -102,16 +75,21 @@ function Home() {
     award("open_app");
   }, []);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["news", country, category],
-    queryFn: () => fetchNews(category, country),
-    refetchInterval: false,
-    staleTime: 0,
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/news?category=${encodeURIComponent(category)}&country=${encodeURIComponent(country)}`
+      );
+      return res.json();
+    },
+    refetchInterval: refreshMs === 0 ? false : 5 * 60 * 1000,
+    staleTime: 5 * 60 * 1000,
   });
 
-  const apiItems: NewsItem[] = (data?.items ?? []).map((n) => ({
+  const apiItems: NewsItem[] = (data?.items ?? []).map((n: ApiNewsItem) => ({
     id: n.id,
-    category: normalizeCategory(n.category),
+    category: n.category as Category,
     title: n.title,
     source: n.source,
     region: n.region,
@@ -125,7 +103,7 @@ function Home() {
     .filter((p) => category === "Top" || p.category === category)
     .map((p) => ({
       id: p.id,
-      category: normalizeCategory(p.category),
+      category: p.category,
       title: p.title,
       source: "Community",
       region: p.region || "Community",
@@ -135,46 +113,71 @@ function Home() {
       image: p.media?.find((m) => m.type === "image")?.dataUrl,
     }));
 
-  const allItems = [...userItems, ...apiItems];
+  const allItems: NewsItem[] = [...userItems, ...apiItems];
 
   const now = Date.now();
 
-  // -----------------------------
-  // 🧠 SMART RECENCY ENGINE
-  // -----------------------------
-  const scoredItems = allItems.map((item) => {
-    const age = now - +new Date(item.publishedAt);
+  /*
+  -----------------------------------------------------
+  RESOLVE WINDOW
+  -----------------------------------------------------
+  */
+  let windowMs = 0;
 
-    // freshness score (higher = newer)
-    const freshnessScore = Math.max(0, 1 - age / (24 * 60 * 60 * 1000));
+  if (typeof refreshMs === "number") {
+    windowMs = refreshMs;
+  } else {
+    windowMs =
+      refreshMs.hours * 60 * 60 * 1000 +
+      refreshMs.minutes * 60 * 1000;
+  }
 
-    return {
-      ...item,
-      _score: freshnessScore,
-    };
-  });
+  const isAllNews = windowMs === 0;
 
   let items: NewsItem[] = [];
 
-  if (mode === "off") {
-    // 🧠 SMART MODE: no filtering, just intelligent ranking
-    items = scoredItems
-      .sort((a, b) => b._score - a._score)
-      .map(({ _score, ...rest }) => rest);
-  } else {
-    // 🧹 HARD FILTER MODE (user-controlled)
-    items = scoredItems
-      .filter((i) => now - +new Date(i.publishedAt) <= refreshMs)
-      .sort((a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt))
-      .map(({ _score, ...rest }) => rest);
+  /*
+  -----------------------------------------------------
+  ALL NEWS MODE
+  NO FILTER + NEWEST → OLDEST
+  -----------------------------------------------------
+  */
+  if (isAllNews) {
+    items = [...allItems].sort(
+      (a, b) =>
+        new Date(b.publishedAt).getTime() -
+        new Date(a.publishedAt).getTime()
+    );
   }
 
-  useEffect(() => {
-    if (allItems.length) cacheArticles(allItems);
-  }, [data?.fetchedAt, state.userPosts.length]);
+  /*
+  -----------------------------------------------------
+  TIME MODES + CUSTOM RANGE
+  FILTER + OLDEST → NEWEST
+  -----------------------------------------------------
+  */
+  else {
+    const filtered = allItems.filter((item) => {
+      const age = now - new Date(item.publishedAt).getTime();
+      return age <= windowMs;
+    });
 
+    items = filtered.sort(
+      (a, b) =>
+        new Date(a.publishedAt).getTime() -
+        new Date(b.publishedAt).getTime()
+    );
+  }
+
+  /*
+  -----------------------------------------------------
+  CACHE + PRELOAD ENGINE
+  -----------------------------------------------------
+  */
   useEffect(() => {
     if (!items.length) return;
+
+    cacheArticles(items);
 
     const batch = items.slice(0, 12);
     const key = batch.map((b) => b.id).join(",");
@@ -212,39 +215,34 @@ function Home() {
         <div className="flex items-center justify-between gap-2">
           <CountrySelector value={country} onChange={setCountry} />
 
-          <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <Timer className="h-3 w-3" />
+
             <select
-              value={mode}
-              onChange={(e) => setMode(e.target.value as any)}
+              value={
+                typeof refreshMs === "number"
+                  ? refreshMs
+                  : "custom"
+              }
+              onChange={(e) => {
+                const v = e.target.value;
+
+                if (v === "custom") {
+                  setRefreshMs({ hours: 0, minutes: 0 });
+                } else {
+                  setRefreshMs(Number(v));
+                }
+              }}
               className="text-xs border rounded px-2 py-1"
             >
-              <option value="off">Smart (Off)</option>
-              <option value="5m">5 min</option>
-              <option value="10m">10 min</option>
-              <option value="30m">30 min</option>
-              <option value="1h">1 hour</option>
-              <option value="24h">24 hours</option>
+              <option value={300000}>5 min</option>
+              <option value={600000}>10 min</option>
+              <option value={1800000}>30 min</option>
+              <option value={3600000}>1 hour</option>
+              <option value={86400000}>24 hours</option>
+              <option value={0}>All News</option>
               <option value="custom">Custom</option>
             </select>
-
-            {mode === "custom" && (
-              <div className="flex gap-1">
-                <input
-                  type="number"
-                  value={customHours}
-                  onChange={(e) => setCustomHours(Number(e.target.value))}
-                  className="w-12 text-xs border rounded px-1"
-                  placeholder="h"
-                />
-                <input
-                  type="number"
-                  value={customMinutes}
-                  onChange={(e) => setCustomMinutes(Number(e.target.value))}
-                  className="w-12 text-xs border rounded px-1"
-                  placeholder="m"
-                />
-              </div>
-            )}
           </div>
         </div>
 
@@ -258,6 +256,12 @@ function Home() {
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" />
             Loading feed...
+          </div>
+        )}
+
+        {(error as any) && (
+          <div className="text-xs text-red-500">
+            Failed to load news
           </div>
         )}
 
