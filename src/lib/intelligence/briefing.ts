@@ -1,4 +1,3 @@
-import { loadSummaryCache } from "./aiCache";
 import { getBriefIdentity } from "./identity";
 
 export interface BriefingInput {
@@ -8,156 +7,116 @@ export interface BriefingInput {
 }
 
 /* -----------------------------
-   CLEAN HEADLINE FILTER
+   HEADLINE CLEANER
 ------------------------------*/
 
-function isCleanHeadline(h: string): boolean {
-  const x = h.toLowerCase();
-
-  const blocked = [
-    "frontiers",
-    "arxiv",
-    "doi",
-    "css",
-    "javascript",
-    "react",
-    "tutorial",
-    "conference",
-    "abstract",
-    "paper",
-    "study",
-    "journal",
-    "volume",
-    "issue",
-  ];
-
-  return !blocked.some((b) => x.includes(b));
+function clean(headlines: string[]) {
+  return headlines
+    .filter(Boolean)
+    .filter((h) => typeof h === "string")
+    .filter((h) => h.length > 25)
+    .filter((h) => !h.toLowerCase().includes("frontiers |"))
+    .slice(0, 12);
 }
 
 /* -----------------------------
-   REMOVE SOURCE TAGS (IMPORTANT FIX)
+   IDENTITY (SINGLE SOURCE)
 ------------------------------*/
 
-function compressHeadline(h: string): string {
-  return h
-    .replace(/-.*$/, "") // removes "- SourceName"
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/* -----------------------------
-   IDENTITY
-------------------------------*/
-
-function buildIdentity(userName?: string | null) {
-  const base = getBriefIdentity(userName);
-
-  const fallback = [
-    "ScrollSeer",
-    "NewsNomad",
-    "PulseWalker",
-    "StoryDrifter",
-  ];
-
-  return base || fallback[Math.floor(Math.random() * fallback.length)];
-}
-
-/* -----------------------------
-   OPENING
-------------------------------*/
-
-function buildOpening(identity: string, country?: string) {
-  const base =
-    country && country !== "GLOBAL"
-      ? `${country} woke up to a mixed bag of chaos and charm today as`
-      : `The world woke up to a mixed bag of chaos and charm today as`;
-
-  return `Hi ${identity}, ${base} five headline stories shaped today’s mood.`;
-}
-
-/* -----------------------------
-   STORY BUILDER
-------------------------------*/
-
-function buildStory(headlines: string[], country?: string, identity?: string) {
-  const top = headlines.slice(0, 5);
-
-  const intro = buildOpening(identity || "Reader", country);
-
-  const hooks = ["First,", "Second,", "Third,", "Fourth,", "Finally,"];
-
-  const body = top.map((h, i) => {
-    const clean = compressHeadline(h);
-
-    return `${hooks[i]} ${clean} shaped part of today’s unfolding narrative.`;
-  });
-
-  const conclusion =
-    "In the end, today didn’t just deliver news — it became a connected story unfolding in real time.";
-
-  return { intro, body, conclusion };
+function identity(userName?: string | null) {
+  return getBriefIdentity(userName);
 }
 
 /* -----------------------------
    COUNTRY CONTEXT
 ------------------------------*/
 
-function buildCountryContext(country?: string) {
+function countryContext(country?: string) {
   if (!country || country === "GLOBAL") {
-    return "This briefing connects local developments with broader global momentum.";
+    return "global";
   }
-
-  return `This briefing is grounded in ${country}, shaped by global pressures influencing local outcomes.`;
+  return country;
 }
 
 /* -----------------------------
-   CACHE
+   OPENING LINE
 ------------------------------*/
 
-function extractCachedSummaries(limit = 5): string[] {
-  const cache = loadSummaryCache();
-  const collected: string[] = [];
+function buildOpening(name: string, country: string) {
+  const hooks = [
+    "today unfolds like interconnected stories refusing to stay separate.",
+    "today moves with quiet tension and unexpected turns.",
+    "today reads like events are reacting to each other in real time.",
+    "today carries a mix of pressure, change, and momentum.",
+  ];
 
-  for (const key of Object.keys(cache)) {
-    const lines = cache[key];
-    if (Array.isArray(lines)) collected.push(...lines);
-    if (collected.length >= limit) break;
-  }
+  const hook = hooks[Math.floor(Math.random() * hooks.length)];
 
-  return collected.slice(0, limit);
+  return `Hi ${name}, ${country === "global" ? "today’s global briefing" : `today in ${country}`} ${hook}`;
 }
 
 /* -----------------------------
-   FALLBACK
+   STORY TRANSFORMER
 ------------------------------*/
 
-function fallback(headlines: string[]) {
-  return headlines.filter(Boolean).slice(0, 5);
+function transform(headline: string) {
+  const h = headline.replace(/\s+/g, " ").trim();
+
+  const tones = [
+    "is shaping today’s unfolding narrative",
+    "is feeding into a larger chain of developments",
+    "is adding momentum to ongoing shifts",
+    "is part of today’s connected storyline",
+    "is influencing the broader news cycle",
+  ];
+
+  const tone = tones[Math.floor(Math.random() * tones.length)];
+
+  return `${h} ${tone}.`;
 }
 
 /* -----------------------------
-   MAIN ENGINE
+   CONCLUSION (ONE LINE ONLY)
+------------------------------*/
+
+function buildConclusion(country: string, headlines: string[]) {
+  const h = headlines.join(" ").toLowerCase();
+
+  let mood = "balanced but active";
+
+  if (h.includes("war") || h.includes("conflict")) mood = "tense and geopolitically sensitive";
+  if (h.includes("market") || h.includes("economy")) mood = "economically reactive";
+  if (h.includes("ai") || h.includes("tech")) mood = "driven by rapid technological acceleration";
+
+  if (country === "global") {
+    return `Overall, today’s global cycle remains ${mood}, with tightly linked developments across regions.`;
+  }
+
+  return `Overall, ${country} remains in a ${mood} news cycle shaped by both local and global forces.`;
+}
+
+/* -----------------------------
+   MAIN ENGINE (LOCKED)
 ------------------------------*/
 
 export function buildBriefing(input: BriefingInput) {
-  const clean = input.headlines.filter(isCleanHeadline);
+  const cleaned = clean(input.headlines);
 
-  const source = clean.length > 0 ? clean : fallback(input.headlines);
+  const name = identity(input.userName);
+  const country = countryContext(input.country);
 
-  const cached = extractCachedSummaries(5);
+  // FORCE EXACTLY 5 STORIES
+  const stories = cleaned.slice(0, 5).map(transform);
 
-  const final = cached.length > 0 ? cached : source;
-
-  const identity = buildIdentity(input.userName);
-
-  const story = buildStory(final, input.country, identity);
+  // If not enough headlines, pad safely
+  while (stories.length < 5) {
+    stories.push("Developments continue to evolve across multiple sectors.");
+  }
 
   return {
-    identity,
-    opening: story.intro,
-    countryContext: buildCountryContext(input.country),
-    sections: story.body,
-    lines: story.body,
-    conclusion: story.conclusion,
+    opening: buildOpening(name, country),
+    stories,
+    conclusion: buildConclusion(country, cleaned),
+    identity: name,
   };
 }
