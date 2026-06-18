@@ -24,16 +24,16 @@ export const Route = createFileRoute("/")({
   component: Home,
 });
 
-/* ---------------- CORE RECENCY MODES ---------------- */
+/* ---------------- RECENCY MODES (NO SLIDER VERSION) ---------------- */
 
 type RecencyMode = "OFF" | "5M" | "30M" | "1H" | "LIVE" | "CUSTOM";
 
-const RECENCY_MAP: Record<RecencyMode, number> = {
+const MODE_VALUES: Record<RecencyMode, number> = {
   OFF: 0,
   "5M": 5 * 60 * 1000,
   "30M": 30 * 60 * 1000,
   "1H": 60 * 60 * 1000,
-  LIVE: 15 * 1000, // near-real-time refresh feel
+  LIVE: 15 * 1000,
   CUSTOM: -1,
 };
 
@@ -64,7 +64,6 @@ function Home() {
   const [customMinutes, setCustomMinutes] = useState(0);
 
   const { state, update } = useAppState();
-
   const countryMeta = findCountry(country);
 
   const setCountry = (code: string) => {
@@ -72,11 +71,12 @@ function Home() {
     update((s) => ({ ...s, country: code }));
   };
 
-  /* ---------------- APPLY MODE ---------------- */
+  /* ---------------- MODE SYNC ---------------- */
 
   useEffect(() => {
-    if (mode === "CUSTOM") return;
-    setRefreshMs(RECENCY_MAP[mode]);
+    if (mode !== "CUSTOM") {
+      setRefreshMs(MODE_VALUES[mode]);
+    }
   }, [mode]);
 
   const applyCustom = () => {
@@ -85,7 +85,7 @@ function Home() {
     setMode("CUSTOM");
   };
 
-  /* ---------------- NEWS FETCH ---------------- */
+  /* ---------------- DATA ---------------- */
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["news", country, category],
@@ -144,17 +144,16 @@ function Home() {
 
         <CountrySelector value={country} onChange={setCountry} />
 
-        {/* ---------------- SMART SEGMENTED CONTROL ---------------- */}
-        <div className="space-y-2 border rounded p-2">
+        {/* ---------------- SEGMENTED CONTROL ONLY ---------------- */}
+        <div className="border rounded p-2 space-y-2">
 
-          {/* SEGMENTS */}
           <div className="flex flex-wrap gap-2 text-xs">
             {(["OFF", "5M", "30M", "1H", "LIVE"] as RecencyMode[]).map(
               (m) => (
                 <button
                   key={m}
                   onClick={() => setMode(m)}
-                  className={`px-2 py-1 rounded border ${
+                  className={`px-2 py-1 border rounded ${
                     mode === m ? "bg-black text-white" : ""
                   }`}
                 >
@@ -165,7 +164,7 @@ function Home() {
 
             <button
               onClick={() => setMode("CUSTOM")}
-              className={`px-2 py-1 rounded border ${
+              className={`px-2 py-1 border rounded ${
                 mode === "CUSTOM" ? "bg-black text-white" : ""
               }`}
             >
@@ -173,7 +172,7 @@ function Home() {
             </button>
           </div>
 
-          {/* CUSTOM INPUT (ONLY WHEN ACTIVE) */}
+          {/* CUSTOM INPUT ONLY WHEN ACTIVE */}
           {mode === "CUSTOM" && (
             <div className="flex items-center gap-2">
               <input
