@@ -16,38 +16,56 @@ export function AISummaryCard({ headlines, country }: Props) {
   const [briefing, setBriefing] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // THIS IS THE SINGLE SOURCE OF TRUTH FOR REFRESH
+  const [secondsLeft, setSecondsLeft] = useState(300); // 5 minutes
   const [version, setVersion] = useState(0);
 
+  /* -----------------------------
+     BUILD BRIEFING
+  ------------------------------*/
   const build = () => {
     setLoading(true);
 
-    const result = buildBriefing({
+    const res = buildBriefing({
       headlines,
       userName,
       country,
-      refreshKey: version,
     });
 
-    setBriefing(result);
+    setBriefing(res);
     setLoading(false);
   };
 
-  // rebuild whenever version changes
+  /* -----------------------------
+     REBUILD ON VERSION CHANGE
+  ------------------------------*/
   useEffect(() => {
     build();
   }, [version, headlines, userName, country]);
 
-  // AUTO REFRESH EVERY 5 MINUTES (REAL ONE)
+  /* -----------------------------
+     REAL COUNTDOWN TIMER
+  ------------------------------*/
   useEffect(() => {
-    const interval = setInterval(() => {
-      setVersion((v) => v + 1);
-    }, 5 * 60 * 1000);
+    const timer = setInterval(() => {
+      setSecondsLeft((s) => {
+        if (s <= 1) {
+          setVersion((v) => v + 1); // auto refresh
+          return 300;
+        }
+        return s - 1;
+      });
+    }, 1000);
 
-    return () => clearInterval(interval);
+    return () => clearInterval(timer);
   }, []);
 
-  const refresh = () => setVersion((v) => v + 1);
+  const refresh = () => {
+    setVersion((v) => v + 1);
+    setSecondsLeft(300);
+  };
+
+  const mm = String(Math.floor(secondsLeft / 60)).padStart(2, "0");
+  const ss = String(secondsLeft % 60).padStart(2, "0");
 
   return (
     <div className="rounded-xl border border-border bg-surface-1 p-4 space-y-3">
@@ -55,14 +73,11 @@ export function AISummaryCard({ headlines, country }: Props) {
       {/* HEADER */}
       <div className="flex items-center justify-between">
         <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-          AI Briefing · {new Date().toLocaleTimeString().slice(0, 5)}
+          AI Briefing · {mm}:{ss}
         </div>
 
-        <button
-          onClick={refresh}
-          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-        >
-          <RefreshCw className="h-3 w-3" />
+        <button onClick={refresh}>
+          <RefreshCw className="h-3 w-3 text-muted-foreground" />
         </button>
       </div>
 
@@ -73,7 +88,7 @@ export function AISummaryCard({ headlines, country }: Props) {
           Composing briefing...
         </div>
       ) : (
-        <div className="space-y-3 text-sm leading-relaxed text-foreground/90">
+        <div className="space-y-3 text-sm leading-relaxed">
 
           <p className="font-medium">{briefing.opening}</p>
 
@@ -81,7 +96,7 @@ export function AISummaryCard({ headlines, country }: Props) {
             <p key={i}>{s}</p>
           ))}
 
-          <p className="font-semibold pt-2 border-t border-border">
+          <p className="font-semibold border-t pt-2">
             {briefing.conclusion}
           </p>
 
