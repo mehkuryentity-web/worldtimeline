@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { buildBriefing } from "@/lib/intelligence/briefing";
 import { useAppState } from "@/hooks/use-app-state";
@@ -12,37 +12,33 @@ export function AISummaryCard({ headlines, country }: Props) {
   const { state } = useAppState();
 
   const [refreshKey, setRefreshKey] = useState(0);
-  const [data, setData] = useState<any>(null);
+  const [briefing, setBriefing] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [time, setTime] = useState(Date.now());
 
   const userName = state?.user?.name ?? null;
 
-  const briefing = useMemo(() => {
-    return buildBriefing({
+  useEffect(() => {
+    setLoading(true);
+
+    const result = buildBriefing({
       headlines,
       userName,
       country,
       refreshKey,
     });
+
+    setBriefing(result);
+    setLoading(false);
+    setTime(Date.now());
   }, [headlines, userName, country, refreshKey]);
-
-  useEffect(() => {
-    setLoading(true);
-
-    const t = setTimeout(() => {
-      setData(briefing);
-      setLoading(false);
-    }, 200);
-
-    return () => clearTimeout(t);
-  }, [briefing]);
 
   return (
     <div className="rounded-xl border border-border bg-surface-1 p-4 space-y-3">
-      {/* HEADER + REFRESH */}
+      {/* HEADER */}
       <div className="flex items-center justify-between">
         <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-          AI Briefing · {new Date().toLocaleTimeString().slice(0, 5)}
+          AI Briefing · {new Date(time).toLocaleTimeString().slice(0, 5)}
         </div>
 
         <button
@@ -53,21 +49,22 @@ export function AISummaryCard({ headlines, country }: Props) {
         </button>
       </div>
 
-      {loading || !data ? (
+      {/* BODY */}
+      {loading || !briefing ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin" />
           Composing briefing...
         </div>
       ) : (
         <div className="space-y-3 text-sm leading-relaxed text-foreground/90">
-          <p className="font-medium">{data.opening}</p>
+          <p className="font-medium">{briefing.opening}</p>
 
-          {data.stories.map((s: string, i: number) => (
+          {briefing.stories.map((s: string, i: number) => (
             <p key={i}>{s}</p>
           ))}
 
-          <p className="font-medium pt-2 border-t border-border">
-            {data.conclusion}
+          <p className="font-semibold pt-2 border-t border-border">
+            {briefing.conclusion}
           </p>
         </div>
       )}
