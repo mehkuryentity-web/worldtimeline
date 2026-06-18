@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { TopBar } from "@/components/TopBar";
@@ -14,28 +14,32 @@ import {
   CATEGORIES,
   type Category,
   type NewsItem,
-  cacheArticles,
 } from "@/lib/mock-news";
 
 import { findCountry } from "@/lib/countries";
 import { useAppState } from "@/hooks/use-app-state";
 import { Loader2 } from "lucide-react";
 
-import { fetchPreloadedSummaries } from "@/lib/news.functions";
-import { enqueueArticles } from "@/lib/intelligence/preloadEngine";
-
 export const Route = createFileRoute("/")({
   component: Home,
 });
 
-const TIME_OPTIONS = [
-  { label: "Off", value: 0 },
-  { label: "5 min", value: 5 * 60 * 1000 },
-  { label: "10 min", value: 10 * 60 * 1000 },
-  { label: "30 min", value: 30 * 60 * 1000 },
-  { label: "1 hour", value: 60 * 60 * 1000 },
-  { label: "24 hours", value: 24 * 60 * 60 * 1000 },
+/* ---------------- TIME CONTROL ---------------- */
+
+const SLIDER_VALUES = [
+  0, // OFF
+  5 * 60 * 1000,
+  10 * 60 * 1000,
+  30 * 60 * 1000,
+  60 * 60 * 1000,
+  24 * 60 * 60 * 1000,
 ];
+
+function formatLabel(ms: number) {
+  if (ms === 0) return "Off";
+  if (ms < 60 * 60 * 1000) return `${ms / 60000} min`;
+  return `${ms / 3600000} hr`;
+}
 
 function normalizeCategory(cat: string): Category {
   const found = CATEGORIES.find(
@@ -51,17 +55,20 @@ async function fetchNews(category: Category, country: string) {
   return res.json();
 }
 
+/* ---------------- HOME ---------------- */
+
 function Home() {
   const [category, setCategory] = useState<Category>("Top");
   const [country, setCountryState] = useState("GLOBAL");
 
+  // main recency window (OFF default)
   const [refreshMs, setRefreshMs] = useState<number>(0);
 
+  // custom input
   const [customHours, setCustomHours] = useState(0);
   const [customMinutes, setCustomMinutes] = useState(0);
 
-  const { state, award, update } = useAppState();
-
+  const { state, update } = useAppState();
   const countryMeta = findCountry(country);
 
   const setCountry = (code: string) => {
@@ -69,14 +76,9 @@ function Home() {
     update((s) => ({ ...s, country: code }));
   };
 
-  useEffect(() => {
-    award("open_app");
-  }, []);
-
   const { data, isLoading, error } = useQuery({
     queryKey: ["news", country, category],
     queryFn: () => fetchNews(category, country),
-
     refetchInterval: refreshMs > 0 ? refreshMs : false,
     staleTime: 0,
   });
@@ -105,7 +107,7 @@ function Home() {
     image: p.media?.find((m: any) => m.type === "image")?.dataUrl,
   }));
 
-  const allItems: NewsItem[] = [...userItems, ...apiItems].sort(
+  const allItems = [...userItems, ...apiItems].sort(
     (a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt)
   );
 
@@ -118,13 +120,15 @@ function Home() {
         )
       : allItems;
 
-  function setTimeMode(value: number) {
+  /* ---------------- TIME LOGIC ---------------- */
+
+  function setFromSlider(value: number) {
     setRefreshMs(value);
   }
 
   function applyCustomRange() {
-    const total = (customHours * 60 + customMinutes) * 60 * 1000;
-    setRefreshMs(total);
+    const ms = (customHours * 60 + customMinutes) * 60 * 1000;
+    setRefreshMs(ms);
   }
 
   return (
@@ -133,41 +137,55 @@ function Home() {
 
       <Ticker items={items.slice(0, 8).map((i) => i.title)} />
 
-      <main className="mx-auto max-w-md space-y-4 px-4 pb-6 pt-4">
+      <main className="mx-auto max-w-md space-y-4 px-4 pt-4 pb-6">
         <AISummaryCard headlines={items.slice(0, 6).map((i) => i.title)} />
 
         <CountrySelector value={country} onChange={setCountry} />
 
-        {/* TIME SELECTOR */}
-        <div className="flex gap-2 items-center">
-          <select
-            value={refreshMs}
-            onChange={(e) => setTimeMode(Number(e.target.value))}
-          >
-            {TIME_OPTIONS.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </select>
+        {/* ---------------- TIME CONTROL BAR ---------------- */}
+        <div className="flex flex-col gap-2 border rounded p-2">
 
+          {/* SLIDER */}
           <input
-            type="number"
-            placeholder="hrs"
-            value={customHours}
-            onChange={(e) => setCustomHours(Number(e.target.value))}
-            className="w-12"
+            type="range"
+            min={0}
+            max={SLIDER_VALUES.length - 1}
+            value={SLIDER_VALUES.indexOf(refreshMs)}
+            onChange={(e) =>
+              setFromSlider(SLIDER_VALUES[Number(e.target.value)])
+            }
           />
 
-          <input
-            type="number"
-            placeholder="min"
-            value={customMinutes}
-            onChange={(e) => setCustomMinutes(Number(e.target.value))}
-            className="w-12"
-          />
+          {/* LABEL */}
+          <div className="text-xs text-muted-foreground">
+            Recency: {formatLabel(refreshMs)}
+          </div>
 
-          <button onClick={applyCustomRange}>Set</button>
+          {/* CUSTOM RANGE */}
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              placeholder="hrs"
+              className="w-12 text-xs border rounded px-1"
+              value={customHours}
+              onChange={(e) => setCustomHours(Number(e.target.value))}
+            />
+
+            <input
+              type="number"
+              placeholder="min"
+              className="w-12 text-xs border rounded px-1"
+              value={customMinutes}
+              onChange={(e) => setCustomMinutes(Number(e.target.value))}
+            />
+
+            <button
+              onClick={applyCustomRange}
+              className="text-xs px-2 py-1 border rounded"
+            >
+              Apply
+            </button>
+          </div>
         </div>
 
         <CategoryTabs value={category} onChange={setCategory} />
