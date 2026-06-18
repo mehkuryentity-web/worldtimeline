@@ -6,34 +6,22 @@ export interface BriefingInput {
   country?: string;
 }
 
-/* -----------------------------
-   IDENTITY
-------------------------------*/
+/* ---------------------------------------
+   IDENTITY (FIXED PRIORITY LOGIC)
+----------------------------------------*/
 
-function identity(name?: string | null) {
-  return getBriefIdentity(name);
+function resolveIdentity(userName?: string | null) {
+  // STRICT RULE:
+  // if user exists → always use it
+  // else → generate fallback identity
+  const base = getBriefIdentity(userName);
+
+  return userName && userName.trim().length > 0 ? userName : base;
 }
 
-/* -----------------------------
-   OPENING (EDITORIAL VOICE)
-------------------------------*/
-
-function opening(name: string, country?: string) {
-  const hooks = [
-    "today is unfolding in uneven bursts across multiple fronts.",
-    "today moves like a newsroom under pressure, stitching unrelated events into one frame.",
-    "today feels dense, fast, and slightly unpredictable in direction.",
-    "today carries overlapping developments that refuse to stay in their lanes.",
-  ];
-
-  return `Hi ${name}, ${country ?? "global"} — ${
-    hooks[Math.floor(Math.random() * hooks.length)]
-  }`;
-}
-
-/* -----------------------------
-   CLEAN HEADLINE
-------------------------------*/
+/* ---------------------------------------
+   CLEAN HEADLINES
+----------------------------------------*/
 
 function clean(h: string) {
   return h
@@ -42,23 +30,75 @@ function clean(h: string) {
     .trim();
 }
 
-/* -----------------------------
-   TRANSITION ENGINE (EDITOR FLOW)
-------------------------------*/
+/* ---------------------------------------
+   THEME DETECTION (DRIVES OPENING + CONCLUSION)
+----------------------------------------*/
+
+function detectThemes(headlines: string[]) {
+  const text = headlines.join(" ").toLowerCase();
+
+  const themes: string[] = [];
+
+  if (text.includes("ai") || text.includes("tech") || text.includes("software"))
+    themes.push("technology acceleration");
+
+  if (text.includes("election") || text.includes("government") || text.includes("policy"))
+    themes.push("political movement");
+
+  if (text.includes("market") || text.includes("economy") || text.includes("bank"))
+    themes.push("economic pressure");
+
+  if (text.includes("war") || text.includes("conflict") || text.includes("security"))
+    themes.push("geopolitical tension");
+
+  if (text.includes("health") || text.includes("hospital"))
+    themes.push("public health developments");
+
+  if (themes.length === 0) themes.push("mixed sector activity");
+
+  return themes;
+}
+
+/* ---------------------------------------
+   DYNAMIC OPENING (NO TEMPLATES)
+----------------------------------------*/
+
+function buildOpening(name: string, country?: string, themes?: string[]) {
+  const region = country && country !== "GLOBAL" ? country : "global";
+
+  const toneA = [
+    "moves through overlapping signals",
+    "opens with competing currents",
+    "unfolds across multiple pressure points",
+    "starts with fragmented but connected developments",
+  ];
+
+  const selectedTone = toneA[Math.floor(Math.random() * toneA.length)];
+
+  const themeText = themes?.length
+    ? themes.join(", ")
+    : "multiple global developments";
+
+  return `Hi ${name}, ${region} today ${selectedTone} shaped by ${themeText}.`;
+}
+
+/* ---------------------------------------
+   TRANSITION ENGINE
+----------------------------------------*/
 
 const transitions = [
   "Meanwhile,",
   "At the same time,",
-  "Across another line of reporting,",
-  "Elsewhere in the cycle,",
-  "In parallel,",
+  "Elsewhere,",
+  "In another thread,",
+  "Across another layer of reporting,",
 ];
 
-/* -----------------------------
-   LIVE NEWSROOM PARAGRAPH BUILDER
-------------------------------*/
+/* ---------------------------------------
+   NEWSROOM PARAGRAPH BUILDER
+----------------------------------------*/
 
-function buildNewsroomParagraph(headlines: string[]) {
+function buildParagraph(headlines: string[]) {
   const top5 = headlines.slice(0, 5);
 
   return top5
@@ -71,47 +111,48 @@ function buildNewsroomParagraph(headlines: string[]) {
 
       return `${t} ${story}`;
     })
-    .join(". ");
+    .join(" ");
 }
 
-/* -----------------------------
-   CONCLUSION (EDITOR CLOSE)
-------------------------------*/
+/* ---------------------------------------
+   DYNAMIC CONCLUSION (NO STATIC PHRASES)
+----------------------------------------*/
 
-function conclusion(headlines: string[]) {
+function buildConclusion(headlines: string[], themes: string[]) {
   const text = headlines.join(" ").toLowerCase();
 
-  let tone = "mixed momentum across sectors";
+  let tone = "mixed activity across sectors";
 
-  if (text.includes("war") || text.includes("conflict")) tone = "rising geopolitical pressure";
-  if (text.includes("economy") || text.includes("market")) tone = "financial repositioning underway";
-  if (text.includes("tech")) tone = "rapid technological acceleration";
+  if (text.includes("war") || text.includes("conflict"))
+    tone = "rising geopolitical pressure";
 
-  const closers = [
-    "The day doesn’t resolve itself — it continues to reorganise in real time.",
-    "Nothing settles cleanly today; everything keeps shifting shape.",
-    "It reads less like updates and more like a single evolving sequence.",
-  ];
+  if (text.includes("economy") || text.includes("market"))
+    tone = "economic repositioning underway";
 
-  return `Overall, today reflects ${tone}. ${
-    closers[Math.floor(Math.random() * closers.length)]
-  }`;
+  if (text.includes("tech"))
+    tone = "accelerating technological momentum";
+
+  const themeLine =
+    themes.length > 1
+      ? `The dominant threads are ${themes.join(" and ")}.`
+      : `The dominant thread is ${themes[0]}.`;
+
+  return `Overall, today reflects ${tone}. ${themeLine} The system does not settle — it continuously rebalances itself.`;
 }
 
-/* -----------------------------
+/* ---------------------------------------
    MAIN ENGINE
-------------------------------*/
+----------------------------------------*/
 
 export function buildBriefing(input: BriefingInput) {
-  const name = identity(input.userName);
+  const identity = resolveIdentity(input.userName);
+
+  const themes = detectThemes(input.headlines);
 
   return {
-    identity: name,
-    opening: opening(name, input.country),
-
-    // 🔥 THIS IS THE CORE CHANGE
-    newsroomParagraph: buildNewsroomParagraph(input.headlines),
-
-    conclusion: conclusion(input.headlines),
+    identity,
+    opening: buildOpening(identity, input.country, themes),
+    newsroomParagraph: buildParagraph(input.headlines),
+    conclusion: buildConclusion(input.headlines, themes),
   };
 }
