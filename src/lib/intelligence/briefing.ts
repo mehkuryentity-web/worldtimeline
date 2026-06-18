@@ -8,40 +8,44 @@ export interface BriefingInput {
 }
 
 /* -------------------------------------------------
-   STRICT CLEANING LAYER (NO AI FLUFF ALLOWED)
+   HARD STYLE LOCK (KILLS AI TONE RESIDUE)
 --------------------------------------------------*/
 
-const BAD_PATTERNS = [
-  "adding momentum",
+const BLOCKED_PHRASES = [
+  "does not exist in isolation",
+  "larger pattern",
   "connected storyline",
-  "unfolding narrative",
-  "shaped part of today",
-  "is part of today",
   "global cycle",
-  "developing within today",
+  "unfolding narrative",
+  "part of today",
+  "shaped by",
+  "is adding momentum",
 ];
 
-function sanitize(text: string) {
+function stripAI(text: string) {
   let t = text;
-  for (const p of BAD_PATTERNS) {
+  for (const p of BLOCKED_PHRASES) {
     t = t.replace(new RegExp(p, "gi"), "");
   }
-  return t.trim();
+  return t
+    .replace(/\s+/g, " ")
+    .replace(/\-\s+$/, "")
+    .trim();
 }
 
 function cleanHeadlines(headlines: string[]) {
   return headlines
-    .map(sanitize)
+    .map(stripAI)
     .filter(Boolean)
     .filter((h) => h.length > 20)
     .slice(0, 20);
 }
 
 /* -------------------------------------------------
-   IDENTITY SYSTEM
+   IDENTITY
 --------------------------------------------------*/
 
-function resolveIdentity(userName?: string | null) {
+function identity(userName?: string | null) {
   return getBriefIdentity(userName);
 }
 
@@ -49,102 +53,97 @@ function resolveIdentity(userName?: string | null) {
    COUNTRY CONTEXT
 --------------------------------------------------*/
 
-function countryContext(country?: string) {
-  if (!country || country === "GLOBAL") {
-    return "global";
-  }
-  return country;
+function country(country?: string) {
+  return !country || country === "GLOBAL" ? "global" : country;
 }
 
 /* -------------------------------------------------
-   OPENING (CONVERSATIONAL + WITTY)
+   OPENING (CONVERSATIONAL, NOT REPORTIVE)
 --------------------------------------------------*/
 
-function buildOpening(name: string, country: string) {
+function opening(name: string, region: string) {
   const hooks = [
-    "today feels like everything is talking at once and nothing is waiting its turn.",
-    "today is moving like a group chat nobody can mute.",
-    "today has too many headlines and not enough patience.",
-    "today behaves like chaos with a schedule.",
-    "today is loud in different directions at the same time.",
+    "today is moving like it woke up late and is trying to catch up aggressively.",
+    "today feels slightly uncoordinated but oddly connected.",
+    "today is loud in different directions at once.",
+    "today behaves like it has too many tabs open in its head.",
   ];
 
   const hook = hooks[Math.floor(Math.random() * hooks.length)];
 
-  return `Hi ${name}, ${country === "global" ? "global briefing" : country} — ${hook}`;
+  return `Hi ${name}, ${region === "global" ? "global briefing" : region} — ${hook}`;
 }
 
 /* -------------------------------------------------
-   STORY TRANSFORMATION (NO ECHOING HEADLINES)
+   STORY TRANSFORM (HUMAN VOICE, NO AI FILLER)
 --------------------------------------------------*/
 
-function buildStory(headline: string) {
-  const tails = [
-    "It doesn’t sit alone in today’s cycle.",
-    "It’s quietly pulling other stories into its orbit.",
-    "It’s part of a larger pattern forming underneath the noise.",
-    "It doesn’t exist in isolation today.",
+function story(headline: string) {
+  const endings = [
+    "— and that’s still unfolding.",
+    "— and it’s dragging attention with it.",
+    "— and people are already reacting to it.",
+    "— and it’s not sitting quietly in the background.",
   ];
 
-  const tail = tails[Math.floor(Math.random() * tails.length)];
+  const end = endings[Math.floor(Math.random() * endings.length)];
 
-  return `${headline} — ${tail}`;
+  return `${headline} ${end}`;
 }
 
 /* -------------------------------------------------
-   CONCLUSION (SINGLE LINE + EDGE)
+   CONCLUSION (SINGLE LINE, SHARP, HUMAN)
 --------------------------------------------------*/
 
-function buildConclusion(headlines: string[], country: string) {
+function conclusion(headlines: string[], region: string) {
   const text = headlines.join(" ").toLowerCase();
 
-  let tone = "controlled chaos";
+  let tone = "uneven and reactive";
 
   if (text.includes("war") || text.includes("conflict")) {
-    tone = "tense geopolitical pressure";
+    tone = "tense and unstable";
   } else if (text.includes("economy") || text.includes("market")) {
-    tone = "financial systems under strain";
+    tone = "financially jittery";
   } else if (text.includes("tech") || text.includes("ai")) {
-    tone = "rapid technological acceleration";
+    tone = "moving faster than understanding";
   }
 
   const endings = [
-    "Nothing is calm — it’s just evenly distributed noise.",
-    "The world didn’t slow down; it got better at pretending it did.",
-    "Today didn’t report news — it exposed pressure.",
-    "Everything is connected, nothing is waiting.",
+    "Nothing is settled — it’s just moving in different directions at once.",
+    "It’s all connected, but nothing is coordinated.",
+    "Today didn’t calm down — it scattered more evenly.",
+    "The noise is structured, not random.",
   ];
 
-  const ending = endings[Math.floor(Math.random() * endings.length)];
+  const end = endings[Math.floor(Math.random() * endings.length)];
 
-  return country === "global"
-    ? `Overall, today’s global cycle reflects ${tone}. ${ending}`
-    : `Overall, ${country} reflects ${tone}. ${ending}`;
+  return region === "global"
+    ? `Overall, today’s global mood is ${tone}. ${end}`
+    : `Overall, ${region} feels ${tone}. ${end}`;
 }
 
 /* -------------------------------------------------
-   MAIN BRIEFING ENGINE
+   MAIN ENGINE
 --------------------------------------------------*/
 
 export function buildBriefing(input: BriefingInput) {
   const cleaned = cleanHeadlines(input.headlines);
 
-  const identity = resolveIdentity(input.userName);
-  const country = countryContext(input.country);
+  const name = identity(input.userName);
+  const region = country(input.country);
 
-  const opening = buildOpening(identity, country);
+  const openingLine = opening(name, region);
 
-  // FORCE 5 STORIES ALWAYS
-  const stories = cleaned.slice(0, 5).map(buildStory);
+  const stories = cleaned.slice(0, 5).map(story);
 
   while (stories.length < 5) {
-    stories.push("A developing story continues to evolve quietly in the background.");
+    stories.push("Another story is still developing quietly in the background.");
   }
 
   return {
-    identity,
-    opening,
+    identity: name,
+    opening: openingLine,
     stories,
-    conclusion: buildConclusion(cleaned, country),
+    conclusion: conclusion(cleaned, region),
   };
 }
