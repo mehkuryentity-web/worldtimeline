@@ -19,7 +19,7 @@ import {
 
 import { findCountry } from "@/lib/countries";
 import { useAppState } from "@/hooks/use-app-state";
-import { Loader2 } from "lucide-react";
+import { Loader2, Timer } from "lucide-react";
 
 import { fetchPreloadedSummaries } from "@/lib/news.functions";
 import { enqueueArticles } from "@/lib/intelligence/preloadEngine";
@@ -66,8 +66,9 @@ function Home() {
     "off" | "5m" | "10m" | "30m" | "1h" | "24h" | "custom"
   >("off");
 
-  const [customHours, setCustomHours] = useState(0);
-  const [customMinutes, setCustomMinutes] = useState(0);
+  // CUSTOM INPUTS (EMPTY INIT — FIXED)
+  const [customHours, setCustomHours] = useState<number | "">("");
+  const [customMinutes, setCustomMinutes] = useState<number | "">("");
 
   const getWindowMs = () => {
     switch (mode) {
@@ -82,7 +83,9 @@ function Home() {
       case "24h":
         return 24 * 60 * 60 * 1000;
       case "custom":
-        return (customHours * 60 + customMinutes) * 60 * 1000;
+        return (
+          (Number(customHours || 0) * 60 + Number(customMinutes || 0)) * 60 * 1000
+        );
       default:
         return 0;
     }
@@ -139,35 +142,19 @@ function Home() {
 
   const now = Date.now();
 
-  // -----------------------------
-  // 🧠 SMART RECENCY ENGINE
-  // -----------------------------
   const scoredItems = allItems.map((item) => {
     const age = now - +new Date(item.publishedAt);
-
-    // freshness score (higher = newer)
-    const freshnessScore = Math.max(0, 1 - age / (24 * 60 * 60 * 1000));
-
-    return {
-      ...item,
-      _score: freshnessScore,
-    };
+    const score = Math.max(0, 1 - age / (24 * 60 * 60 * 1000));
+    return { ...item, _score: score };
   });
 
-  let items: NewsItem[] = [];
-
-  if (mode === "off") {
-    // 🧠 SMART MODE: no filtering, just intelligent ranking
-    items = scoredItems
-      .sort((a, b) => b._score - a._score)
-      .map(({ _score, ...rest }) => rest);
-  } else {
-    // 🧹 HARD FILTER MODE (user-controlled)
-    items = scoredItems
-      .filter((i) => now - +new Date(i.publishedAt) <= refreshMs)
-      .sort((a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt))
-      .map(({ _score, ...rest }) => rest);
-  }
+  let items: NewsItem[] =
+    mode === "off"
+      ? scoredItems.sort((a, b) => b._score - a._score).map(({ _score, ...r }) => r)
+      : scoredItems
+          .filter((i) => now - +new Date(i.publishedAt) <= refreshMs)
+          .sort((a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt))
+          .map(({ _score, ...r }) => r);
 
   useEffect(() => {
     if (allItems.length) cacheArticles(allItems);
@@ -212,36 +199,45 @@ function Home() {
         <div className="flex items-center justify-between gap-2">
           <CountrySelector value={country} onChange={setCountry} />
 
+          {/* TIME SELECTOR */}
           <div className="flex flex-col gap-1">
-            <select
-              value={mode}
-              onChange={(e) => setMode(e.target.value as any)}
-              className="text-xs border rounded px-2 py-1"
-            >
-              <option value="off">Smart (Off)</option>
-              <option value="5m">5 min</option>
-              <option value="10m">10 min</option>
-              <option value="30m">30 min</option>
-              <option value="1h">1 hour</option>
-              <option value="24h">24 hours</option>
-              <option value="custom">Custom</option>
-            </select>
+            <div className="flex items-center gap-1">
+              <Timer className="h-3 w-3" />
+
+              <select
+                value={mode}
+                onChange={(e) => setMode(e.target.value as any)}
+                className="text-xs border rounded px-2 py-1"
+              >
+                <option value="off">Off</option>
+                <option value="5m">5 min</option>
+                <option value="10m">10 min</option>
+                <option value="30m">30 min</option>
+                <option value="1h">1 hour</option>
+                <option value="24h">24 hours</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
 
             {mode === "custom" && (
               <div className="flex gap-1">
                 <input
                   type="number"
+                  placeholder="hrs"
                   value={customHours}
-                  onChange={(e) => setCustomHours(Number(e.target.value))}
+                  onChange={(e) =>
+                    setCustomHours(e.target.value === "" ? "" : Number(e.target.value))
+                  }
                   className="w-12 text-xs border rounded px-1"
-                  placeholder="h"
                 />
                 <input
                   type="number"
+                  placeholder="min"
                   value={customMinutes}
-                  onChange={(e) => setCustomMinutes(Number(e.target.value))}
+                  onChange={(e) =>
+                    setCustomMinutes(e.target.value === "" ? "" : Number(e.target.value))
+                  }
                   className="w-12 text-xs border rounded px-1"
-                  placeholder="m"
                 />
               </div>
             )}
