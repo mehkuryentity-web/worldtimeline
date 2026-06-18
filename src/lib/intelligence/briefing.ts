@@ -6,118 +6,112 @@ export interface BriefingInput {
   country?: string;
 }
 
-/* ---------------------------------------
-   YOUR STYLE LOCK (HARD INJECTION)
-----------------------------------------*/
-
-const STYLE_SAMPLE = `
-Hi [Name],
-Nigeria woke up to a mixed bag of chaos and charm today as five headline stories shaped the mood of the nation.
-Each story should feel like part of a lived world, not a report.
-End with a one-line punchy conclusion.
-Humour is subtle, observational, slightly ironic, never robotic.
-No phrases like: "global cycle", "connected storyline", "unfolding narrative".
-No repetitive endings like "and it’s pulling attention".
-`;
-
-/* ---------------------------------------
-   CLEANER (REMOVES AI TEMPLATE VOICE)
-----------------------------------------*/
-
-const BAD = [
-  "global cycle",
-  "connected storyline",
-  "unfolding narrative",
-  "pulling attention",
-  "part of today",
-  "is adding momentum",
-];
-
-function clean(text: string) {
-  let t = text;
-  BAD.forEach((b) => {
-    t = t.replace(new RegExp(b, "gi"), "");
-  });
-
-  return t.replace(/\s+/g, " ").trim();
-}
-
-/* ---------------------------------------
+/* -----------------------------
    IDENTITY
-----------------------------------------*/
+------------------------------*/
 
 function identity(name?: string | null) {
   return getBriefIdentity(name);
 }
 
-/* ---------------------------------------
-   OPENING (HUMAN STYLE LIKE YOUR SAMPLE)
-----------------------------------------*/
+/* -----------------------------
+   OPENING (EDITORIAL VOICE)
+------------------------------*/
 
 function opening(name: string, country?: string) {
   const hooks = [
-    "today didn’t arrive quietly, it showed up with mixed signals and moving parts.",
-    "today feels like multiple stories sharing the same street.",
-    "today carries both tension and charm in equal measure.",
-    "today is busy, slightly chaotic, but meaningfully connected.",
+    "today is unfolding in uneven bursts across multiple fronts.",
+    "today moves like a newsroom under pressure, stitching unrelated events into one frame.",
+    "today feels dense, fast, and slightly unpredictable in direction.",
+    "today carries overlapping developments that refuse to stay in their lanes.",
   ];
 
-  const h = hooks[Math.floor(Math.random() * hooks.length)];
-
-  return `Hi ${name}, ${country ?? "global"} woke up to ${h}`;
+  return `Hi ${name}, ${country ?? "global"} — ${
+    hooks[Math.floor(Math.random() * hooks.length)]
+  }`;
 }
 
-/* ---------------------------------------
-   STORY FORMAT (MATCH YOUR SAMPLE STYLE)
-----------------------------------------*/
+/* -----------------------------
+   CLEAN HEADLINE
+------------------------------*/
 
-function story(h: string) {
-  const endings = [
-    "The impact is still unfolding quietly.",
-    "Reactions are already building around it.",
-    "The ripple effect is visible.",
-    "It continues to shape local direction.",
-  ];
-
-  return `${clean(h)} — ${endings[Math.floor(Math.random() * endings.length)]}`;
+function clean(h: string) {
+  return h
+    .replace(/—.*$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-/* ---------------------------------------
-   CONCLUSION (ONE LINER STYLE LIKE YOURS)
-----------------------------------------*/
+/* -----------------------------
+   TRANSITION ENGINE (EDITOR FLOW)
+------------------------------*/
+
+const transitions = [
+  "Meanwhile,",
+  "At the same time,",
+  "Across another line of reporting,",
+  "Elsewhere in the cycle,",
+  "In parallel,",
+];
+
+/* -----------------------------
+   LIVE NEWSROOM PARAGRAPH BUILDER
+------------------------------*/
+
+function buildNewsroomParagraph(headlines: string[]) {
+  const top5 = headlines.slice(0, 5);
+
+  return top5
+    .map((h, i) => {
+      const story = clean(h);
+
+      if (i === 0) return story;
+
+      const t = transitions[Math.floor(Math.random() * transitions.length)];
+
+      return `${t} ${story}`;
+    })
+    .join(". ");
+}
+
+/* -----------------------------
+   CONCLUSION (EDITOR CLOSE)
+------------------------------*/
 
 function conclusion(headlines: string[]) {
   const text = headlines.join(" ").toLowerCase();
 
-  let tone = "balanced chaos";
+  let tone = "mixed momentum across sectors";
 
-  if (text.includes("war")) tone = "tension rising beneath structured calm";
-  if (text.includes("economy")) tone = "economic pressure shaping sentiment";
-  if (text.includes("tech")) tone = "fast-moving innovation pressure";
+  if (text.includes("war") || text.includes("conflict")) tone = "rising geopolitical pressure";
+  if (text.includes("economy") || text.includes("market")) tone = "financial repositioning underway";
+  if (text.includes("tech")) tone = "rapid technological acceleration";
 
-  const endings = [
-    "In the end, today didn’t just deliver news — it moved like a single connected story.",
-    "In the end, nothing stands alone today — everything reacts to everything.",
-    "In the end, today feels less reported and more experienced.",
+  const closers = [
+    "The day doesn’t resolve itself — it continues to reorganise in real time.",
+    "Nothing settles cleanly today; everything keeps shifting shape.",
+    "It reads less like updates and more like a single evolving sequence.",
   ];
 
   return `Overall, today reflects ${tone}. ${
-    endings[Math.floor(Math.random() * endings.length)]
+    closers[Math.floor(Math.random() * closers.length)]
   }`;
 }
 
-/* ---------------------------------------
+/* -----------------------------
    MAIN ENGINE
-----------------------------------------*/
+------------------------------*/
 
 export function buildBriefing(input: BriefingInput) {
   const name = identity(input.userName);
 
   return {
-    style: STYLE_SAMPLE,
     identity: name,
     opening: opening(name, input.country),
-    stories: input.headlines.slice(0, 5).map(story),
+
+    // 🔥 THIS IS THE CORE CHANGE
+    newsroomParagraph: buildNewsroomParagraph(input.headlines),
+
     conclusion: conclusion(input.headlines),
   };
 }
