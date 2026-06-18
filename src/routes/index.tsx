@@ -19,7 +19,7 @@ import {
 
 import { findCountry } from "@/lib/countries";
 import { useAppState } from "@/hooks/use-app-state";
-import { Loader2 } from "lucide-react";
+import { Loader2, Timer } from "lucide-react";
 
 import { fetchPreloadedSummaries } from "@/lib/news.functions";
 import { enqueueArticles } from "@/lib/intelligence/preloadEngine";
@@ -71,8 +71,10 @@ function Home() {
     () => state.country ?? "GLOBAL"
   );
 
-  const preloadedBatchesRef = useRef<Set<string>>(new Set());
+  // ✅ TIME SELECTOR DEFAULT = OFF
+  const [refreshMs, setRefreshMs] = useState<number>(0);
 
+  const preloadedBatchesRef = useRef<Set<string>>(new Set());
   const countryMeta = findCountry(country);
 
   const setCountry = (code: string) => {
@@ -84,13 +86,10 @@ function Home() {
     award("open_app");
   }, []);
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["news", country, category],
     queryFn: () => fetchNews(category, country),
-
-    // ❌ TIME SELECTOR REMOVED
     refetchInterval: false,
-
     staleTime: 0,
   });
 
@@ -120,17 +119,22 @@ function Home() {
       image: p.media?.find((m) => m.type === "image")?.dataUrl,
     }));
 
-  // PURE FEED (NO TIME FILTERING)
   const allItems: NewsItem[] = [...userItems, ...apiItems].sort(
     (a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt)
   );
 
-  const items = allItems;
+  // 👇 TIME FILTER (OFF = SHOW ALL)
+  const now = Date.now();
+
+  const items =
+    refreshMs > 0
+      ? allItems.filter(
+          (i) => now - +new Date(i.publishedAt) <= refreshMs
+        )
+      : allItems;
 
   useEffect(() => {
-    if (allItems.length) {
-      cacheArticles(allItems);
-    }
+    if (allItems.length) cacheArticles(allItems);
   }, [data?.fetchedAt, state.userPosts.length]);
 
   useEffect(() => {
@@ -159,6 +163,13 @@ function Home() {
     }
   }, [items]);
 
+  const formatTime = (ms: number) => {
+    if (ms === 0) return "Off";
+    if (ms === 86400000) return "24h";
+    if (ms >= 3600000) return `${ms / 3600000}h`;
+    return `${ms / 60000}m`;
+  };
+
   return (
     <div className="min-h-screen bg-background pb-28">
       <TopBar />
@@ -168,8 +179,46 @@ function Home() {
       <main className="mx-auto max-w-md space-y-4 px-4 pb-6 pt-4">
         <AISummaryCard headlines={items.slice(0, 6).map((i) => i.title)} />
 
+        {/* TIME SELECTOR */}
         <div className="flex items-center justify-between gap-2">
           <CountrySelector value={country} onChange={setCountry} />
+
+          <div className="flex items-center gap-2">
+            <Timer className="h-3 w-3" />
+
+            <select
+              value={refreshMs}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+
+                if (v === -1) {
+                  const input = window.prompt(
+                    "Enter minutes (e.g. 90, 720, 1440):",
+                    "120"
+                  );
+
+                  if (!input) return;
+
+                  const mins = Number(input);
+                  if (!isNaN(mins) && mins > 0) {
+                    setRefreshMs(mins * 60000);
+                  }
+                  return;
+                }
+
+                setRefreshMs(v);
+              }}
+              className="text-xs border rounded px-2 py-1"
+            >
+              <option value={0}>Off</option>
+              <option value={300000}>5 min</option>
+              <option value={600000}>10 min</option>
+              <option value={1800000}>30 min</option>
+              <option value={3600000}>1 hour</option>
+              <option value={86400000}>24 hours</option>
+              <option value={-1}>Custom</option>
+            </select>
+          </div>
         </div>
 
         <CategoryTabs value={category} onChange={setCategory} />
