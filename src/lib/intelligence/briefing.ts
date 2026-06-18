@@ -8,28 +8,33 @@ export interface BriefingInput {
 }
 
 /* -----------------------------
-   SIGNAL CLASSIFICATION LAYER
+   CLEAN CLASSIFIER (lightweight grouping)
 ------------------------------*/
 
 function classify(headline: string): string {
   const h = headline.toLowerCase();
 
-  if (h.includes("market") || h.includes("economy") || h.includes("oil") || h.includes("bank"))
-    return "Economic & Market Signals";
+  if (h.includes("market") || h.includes("economy") || h.includes("oil") || h.includes("bank")) {
+    return "Markets & Economy";
+  }
 
-  if (h.includes("election") || h.includes("government") || h.includes("policy") || h.includes("senate"))
-    return "Governance & Political Movement";
+  if (h.includes("election") || h.includes("government") || h.includes("policy") || h.includes("senate")) {
+    return "Politics & Governance";
+  }
 
-  if (h.includes("tech") || h.includes("ai") || h.includes("apple") || h.includes("software"))
-    return "Technology Acceleration";
+  if (h.includes("tech") || h.includes("ai") || h.includes("software") || h.includes("apple") || h.includes("google")) {
+    return "Technology";
+  }
 
-  if (h.includes("climate") || h.includes("weather") || h.includes("cop"))
+  if (h.includes("war") || h.includes("conflict") || h.includes("ceasefire") || h.includes("security")) {
+    return "Geopolitics & Security";
+  }
+
+  if (h.includes("climate") || h.includes("weather") || h.includes("cop")) {
     return "Climate & Environment";
+  }
 
-  if (h.includes("war") || h.includes("ceasefire") || h.includes("security"))
-    return "Security & Geopolitical Tension";
-
-  return "General Developments";
+  return "General Updates";
 }
 
 /* -----------------------------
@@ -37,8 +42,7 @@ function classify(headline: string): string {
 ------------------------------*/
 
 function extractCachedSummaries(limit = 5): string[] {
-  const cache = loadSummaryCache?.() || {};
-
+  const cache = loadSummaryCache();
   const collected: string[] = [];
 
   for (const key of Object.keys(cache)) {
@@ -51,7 +55,72 @@ function extractCachedSummaries(limit = 5): string[] {
 }
 
 /* -----------------------------
-   GROUP BY SIGNAL
+   COUNTRY CONTEXT
+------------------------------*/
+
+function buildCountryContext(country?: string) {
+  if (!country || country === "GLOBAL") {
+    return "Coverage spans global developments across multiple regions.";
+  }
+
+  return `Coverage includes developments relevant to ${country}, connected to wider global shifts.`;
+}
+
+/* -----------------------------
+   OPENING GENERATOR (CLEAN + NO DUPLICATION)
+------------------------------*/
+
+function buildOpening(identity: string) {
+  const openings = [
+    "Today’s news is moving across multiple pressure points at once.",
+    "Today’s briefing captures fast-moving developments across sectors.",
+    "Today’s developments show interconnected shifts across politics, markets, and society.",
+    "Today’s news reflects overlapping changes shaping the global cycle.",
+  ];
+
+  const pick = openings[Math.floor(Math.random() * openings.length)];
+
+  return `Hi ${identity}, ${pick}`;
+}
+
+/* -----------------------------
+   CONCLUSION ENGINE (STRUCTURAL SUMMARY)
+------------------------------*/
+
+function buildConclusion(headlines: string[], country?: string) {
+  const text = headlines.join(" ").toLowerCase();
+
+  let tone = "steady but evolving";
+
+  if (text.includes("war") || text.includes("conflict") || text.includes("attack")) {
+    tone = "marked by rising geopolitical tension";
+  }
+
+  if (text.includes("market") || text.includes("economy") || text.includes("inflation")) {
+    tone = "driven by financial recalibration";
+  }
+
+  if (text.includes("ai") || text.includes("tech") || text.includes("software")) {
+    tone = "shaped by rapid technological acceleration";
+  }
+
+  if (country && country !== "GLOBAL") {
+    return `Overall, ${country}'s news landscape is ${tone}, tightly linked to global momentum.`;
+  }
+
+  return `Overall, global developments remain ${tone}, with cross-regional effects reinforcing each other.`;
+}
+
+/* -----------------------------
+   FALLBACK (NO JUNK SENTENCES)
+------------------------------*/
+
+function fallback(headlines: string[]) {
+  return headlines.slice(0, 5);
+}
+
+/* -----------------------------
+   CLUSTERING
 ------------------------------*/
 
 function cluster(headlines: string[]) {
@@ -64,66 +133,6 @@ function cluster(headlines: string[]) {
   }
 
   return map;
-}
-
-/* -----------------------------
-   FALLBACK MODE (SAFE MODE)
-------------------------------*/
-
-function fallback(headlines: string[]) {
-  return headlines.slice(0, 5).map((h) => `${h} is developing within today’s global cycle.`);
-}
-
-/* -----------------------------
-   COUNTRY CONTEXT BUILDER
-------------------------------*/
-
-function buildCountryContext(country?: string) {
-  if (!country || country === "GLOBAL") {
-    return "This briefing reflects global developments across multiple regions.";
-  }
-
-  return `This briefing is contextualised for ${country}, highlighting local developments alongside global signals.`;
-}
-
-/* -----------------------------
-   OPENING LINE
-------------------------------*/
-
-function buildOpening(identity: string) {
-  const openings = [
-    `Today’s news moves through intersecting global forces and local shifts.`,
-    `Today’s briefing tracks momentum across politics, markets, and society.`,
-    `Today’s developments form a layered pattern of change and reaction.`,
-    `Today’s news reveals multiple pressure points shaping current events.`,
-  ];
-
-  return `Hi ${identity}, ${openings[Math.floor(Math.random() * openings.length)]}`;
-}
-
-/* -----------------------------
-   CONCLUSION ENGINE (CRITICAL)
-------------------------------*/
-
-function buildConclusion(headlines: string[], country?: string) {
-  const h = headlines.join(" ").toLowerCase();
-
-  let tone = "stable but evolving";
-
-  if (h.includes("crisis") || h.includes("war") || h.includes("conflict"))
-    tone = "marked by rising geopolitical tension";
-
-  if (h.includes("market") || h.includes("economy"))
-    tone = "driven by economic adjustment and financial repositioning";
-
-  if (h.includes("tech") || h.includes("ai"))
-    tone = "shaped by rapid technological acceleration";
-
-  if (country && country !== "GLOBAL") {
-    return `Overall, ${country} is experiencing a news cycle that is ${tone}, while remaining tightly connected to broader global developments.`;
-  }
-
-  return `Overall, today’s global news cycle is ${tone}, with interconnected developments across regions reinforcing each other.`;
 }
 
 /* -----------------------------
@@ -144,7 +153,6 @@ export function buildBriefing(input: BriefingInput) {
 
   const sections: string[] = [];
 
-  // build clustered narrative
   for (const [key, items] of Object.entries(clusters)) {
     const summary = items.slice(0, 2).join(" • ");
     sections.push(`${key}: ${summary}`);
