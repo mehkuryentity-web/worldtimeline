@@ -40,10 +40,10 @@ interface ApiNewsItem {
   image?: string;
 }
 
-type CustomRange = {
-  hours: string;
-  minutes: string;
-};
+type TimeMode =
+  | number
+  | "all"
+  | { hours: string; minutes: string };
 
 function Home() {
   const [category, setCategory] = useState<Category>("Top");
@@ -53,8 +53,13 @@ function Home() {
     () => state.country ?? "GLOBAL"
   );
 
-  // 0 = ALL NEWS (newest → oldest)
-  const [refreshMs, setRefreshMs] = useState<number | CustomRange>(0);
+  // DEFAULT = ALL NEWS
+  const [timeMode, setTimeMode] = useState<TimeMode>("all");
+
+  const [customInput, setCustomInput] = useState({
+    hours: "",
+    minutes: "",
+  });
 
   const preloadedBatchesRef = useRef<Set<string>>(new Set());
   const countryMeta = findCountry(country);
@@ -76,7 +81,7 @@ function Home() {
       );
       return res.json();
     },
-    refetchInterval: refreshMs === 0 ? false : 5 * 60 * 1000,
+    refetchInterval: false,
     staleTime: 5 * 60 * 1000,
   });
 
@@ -110,27 +115,27 @@ function Home() {
 
   const now = Date.now();
 
-  // resolve window
+  // ---------------------------
+  // RESOLVE WINDOW
+  // ---------------------------
   let windowMs = 0;
 
-  if (typeof refreshMs === "number") {
-    windowMs = refreshMs;
-  } else {
-    const h = Number(refreshMs.hours || 0);
-    const m = Number(refreshMs.minutes || 0);
-    windowMs = h * 3600000 + m * 60000;
+  if (typeof timeMode === "number") {
+    windowMs = timeMode;
+  } else if (timeMode !== "all") {
+    windowMs =
+      Number(timeMode.hours || 0) * 3600000 +
+      Number(timeMode.minutes || 0) * 60000;
   }
 
-  const isAllNews = windowMs === 0;
+  const isAllNews = timeMode === "all";
 
   let items: NewsItem[] = [];
 
-  /*
-    =========================
-    ALL NEWS MODE
-    newest → oldest
-    =========================
-  */
+  // ---------------------------
+  // ALL NEWS MODE
+  // newest → oldest
+  // ---------------------------
   if (isAllNews) {
     items = [...allItems].sort(
       (a, b) =>
@@ -139,13 +144,10 @@ function Home() {
     );
   }
 
-  /*
-    =========================
-    TIME FILTER MODE
-    oldest → newest
-    (ALL TIME OPTIONS EXCEPT ALL NEWS)
-    =========================
-  */
+  // ---------------------------
+  // TIME FILTER MODE
+  // oldest → newest within window
+  // ---------------------------
   else {
     const filtered = allItems.filter((item) => {
       const age = now - new Date(item.publishedAt).getTime();
@@ -159,11 +161,9 @@ function Home() {
     );
   }
 
-  /*
-    =========================
-    CACHE + PRELOAD
-    =========================
-  */
+  // ---------------------------
+  // PRELOAD ENGINE
+  // ---------------------------
   useEffect(() => {
     if (!items.length) return;
 
@@ -193,12 +193,7 @@ function Home() {
     }
   }, [items]);
 
-  /*
-    =========================
-    CUSTOM RANGE UI FIX
-    =========================
-  */
-  const custom = typeof refreshMs !== "number";
+  const showCustom = timeMode !== "all" && typeof timeMode !== "number";
 
   return (
     <div className="min-h-screen bg-background pb-28">
@@ -209,64 +204,87 @@ function Home() {
       <main className="mx-auto max-w-md space-y-4 px-4 pt-4 pb-6">
         <AISummaryCard headlines={items.slice(0, 6).map((i) => i.title)} />
 
+        {/* TIME SELECTOR */}
         <div className="flex items-center justify-between gap-2">
           <CountrySelector value={country} onChange={setCountry} />
 
-          <div className="flex items-center gap-2">
-            <Timer className="h-3 w-3" />
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <Timer className="h-3 w-3" />
 
-            <select
-              value={custom ? "custom" : refreshMs}
-              onChange={(e) => {
-                const v = e.target.value;
-
-                if (v === "custom") {
-                  setRefreshMs({ hours: "", minutes: "" });
-                } else {
-                  setRefreshMs(Number(v));
+              <select
+                value={
+                  timeMode === "all"
+                    ? "all"
+                    : typeof timeMode === "number"
+                    ? timeMode
+                    : "custom"
                 }
-              }}
-              className="text-xs border rounded px-2 py-1"
-            >
-              <option value={300000}>5 min</option>
-              <option value={600000}>10 min</option>
-              <option value={1800000}>30 min</option>
-              <option value={3600000}>1 hour</option>
-              <option value={86400000}>24 hours</option>
-              <option value={0}>All News</option>
-              <option value="custom">Custom</option>
-            </select>
+                onChange={(e) => {
+                  const v = e.target.value;
+
+                  if (v === "all") {
+                    setTimeMode("all");
+                  } else if (v === "custom") {
+                    setTimeMode({ hours: "", minutes: "" });
+                  } else {
+                    setTimeMode(Number(v));
+                  }
+                }}
+                className="text-xs border rounded px-2 py-1"
+              >
+                <option value="all">All News</option>
+                <option value={300000}>5 min</option>
+                <option value={600000}>10 min</option>
+                <option value={1800000}>30 min</option>
+                <option value={3600000}>1 hour</option>
+                <option value={86400000}>24 hours</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+
+            {/* CUSTOM RANGE */}
+            {showCustom && (
+              <div className="flex gap-2">
+                <input
+                  className="border px-2 py-1 text-xs w-20"
+                  placeholder="hrs"
+                  value={(timeMode as any).hours}
+                  onChange={(e) =>
+                    setTimeMode((prev: any) => ({
+                      ...prev,
+                      hours: e.target.value,
+                    }))
+                  }
+                />
+
+                <input
+                  className="border px-2 py-1 text-xs w-20"
+                  placeholder="min"
+                  value={(timeMode as any).minutes}
+                  onChange={(e) =>
+                    setTimeMode((prev: any) => ({
+                      ...prev,
+                      minutes: e.target.value,
+                    }))
+                  }
+                />
+
+                <button
+                  className="text-xs border px-2 py-1 rounded"
+                  onClick={() => {
+                    const h = Number((timeMode as any).hours || 0);
+                    const m = Number((timeMode as any).minutes || 0);
+
+                    setTimeMode(h * 3600000 + m * 60000);
+                  }}
+                >
+                  Apply
+                </button>
+              </div>
+            )}
           </div>
         </div>
-
-        {/* CUSTOM INPUT FIELDS (FIXED) */}
-        {custom && (
-          <div className="flex gap-2 text-xs">
-            <input
-              placeholder="Hours"
-              value={(refreshMs as any).hours}
-              onChange={(e) =>
-                setRefreshMs((prev: any) => ({
-                  ...prev,
-                  hours: e.target.value,
-                }))
-              }
-              className="border px-2 py-1 rounded w-20"
-            />
-
-            <input
-              placeholder="Minutes"
-              value={(refreshMs as any).minutes}
-              onChange={(e) =>
-                setRefreshMs((prev: any) => ({
-                  ...prev,
-                  minutes: e.target.value,
-                }))
-              }
-              className="border px-2 py-1 rounded w-20"
-            />
-          </div>
-        )}
 
         <CategoryTabs value={category} onChange={setCategory} />
 
@@ -282,9 +300,7 @@ function Home() {
         )}
 
         {(error as any) && (
-          <div className="text-xs text-red-500">
-            Failed to load news
-          </div>
+          <div className="text-xs text-red-500">Failed to load news</div>
         )}
 
         <div className="space-y-3">
