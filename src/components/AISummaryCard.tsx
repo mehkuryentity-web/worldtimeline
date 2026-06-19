@@ -1,104 +1,109 @@
 import { useEffect, useState } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { generateBriefing } from "@/lib/news.functions";
-import { buildBriefing } from "@/lib/intelligence/briefing";
-import { getHybridHeadlines } from "@/lib/intelligence/hybrid";
 import { useAppState } from "@/hooks/use-app-state";
+import { supabase } from "@/lib/supabaseClient";
+
+function hashHeadlines(headlines: string[]) {
+  return headlines.slice(0, 5).join("|");
+}
 
 export function AISummaryCard() {
   const { state } = useAppState();
 
-  const [summary, setSummary] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [time, setTime] = useState(300); // 5 min countdown
-  const [manualRefresh, setManualRefresh] = useState(0);
+  const [summary, setSummary] = useState<string>("");
 
   const userName = state?.user?.name ?? null;
 
   async function load() {
-    setLoading(true);
-
     try {
-      // 🔥 STEP 1: GET REAL INTELLIGENCE FEED (Supabase + Live + deduped)
-      const headlines = await getHybridHeadlines("Top", "GLOBAL");
+      const res = await fetch("/api/news?category=Top&country=GLOBAL");
+      const data = await res.json();
 
-      // 🔥 STEP 2: metadata layer (no narration logic)
-      buildBriefing({
-        headlines,
-        userName,
-        country: "GLOBAL",
-      });
+      const headlines: string[] =
+        (data?.items ?? []).slice(0, 6).map((i: any) => i.title) || [];
 
-      // 🔥 STEP 3: AI GENERATION (Gemini)
-      const result = await generateBriefing({ headlines });
+      if (!headlines.length) {
+        setSummary("Waiting for live newsroom signals...");
+        return;
+      }
+
+      const hash = hashHeadlines(headlines);
+
+      // 1. CHECK CACHE FIRST
+      const cached = await supabase
+        .from("ai_briefings")
+        .select("summary")
+        .eq("headlines_hash", hash)
+        .maybeSingle();
+
+      if (cached?.data?.summary) {
+        setSummary(cached.data.summary);
+
+        // background refresh (silent)
+        generateIfNeeded(headlines, hash);
+        return;
+      }
+
+      // 2. FIRST USER ONLY: GENERATE + SHOW IMMEDIATELY
+      const result = await generateBriefing({ headlines, userName });
 
       setSummary(result.summary);
+
+      await supabase.from("ai_briefings").insert({
+        summary: result.summary,
+        headlines_hash: hash,
+        country: "GLOBAL",
+      });
     } catch (e) {
-      console.error("Briefing failed:", e);
       setSummary("Live briefing temporarily unavailable.");
-    } finally {
-      setLoading(false);
     }
   }
 
-  // initial + refresh trigger
-  useEffect(() => {
-    load();
-  }, [manualRefresh]);
+  async function generateIfNeeded(headlines: string[], hash: string) {
+    const exists = await supabase
+      .from("ai_briefings")
+      .select("id")
+      .eq("headlines_hash", hash)
+      .maybeSingle();
 
-  // countdown timer (5 min auto refresh)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTime((t) => {
-        if (t <= 1) {
-          load();
-          return 300;
-        }
-        return t - 1;
-      });
-    }, 1000);
+    if (exists.data) return;
 
-    return () => clearInterval(interval);
-  }, []);
+    const result = await generateBriefing({ headlines, userName });
 
-  function refreshNow() {
-    setTime(300);
-    setManualRefresh((v) => v + 1);
+    setSummary(result.summary);
+
+    await supabase.from("ai_briefings").insert({
+      summary: result.summary,
+      headlines_hash: hash,
+      country: "GLOBAL",
+    });
   }
 
-  const formatTime = (s: number) =>
-    `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(
-      s % 60
-    ).padStart(2, "0")}`;
+  useEffect(() => {
+    load();
+  }, []);
 
   return (
-    <div className="rounded-xl border border-border bg-surface-1 p-4 space-y-3">
-      {/* header */}
+    <div className="rounded-xl border p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-          AI Briefing · {formatTime(time)}
+        <div className="text-[10px] uppercase text-muted-foreground">
+          AI Briefing
         </div>
 
         <button
-          onClick={refreshNow}
-          className="text-xs flex items-center gap-1 text-muted-foreground hover:text-foreground"
+          onClick={load}
+          className="text-xs flex items-center gap-1"
         >
           <RefreshCw className="h-3 w-3" />
           Refresh
         </button>
       </div>
 
-      {/* content */}
-      {loading ? (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          Composing intelligence briefing...
-        </div>
-      ) : (
-        <div className="text-sm leading-relaxed text-foreground/90">
-          <p>{summary}</p>
-        </div>
-      )}
+      {/* NO LOADING STATE ANYMORE */}
+      <div className="text-sm leading-relaxed">
+        {summary || "Loading briefing..."}
+      </div>
     </div>
   );
 }
