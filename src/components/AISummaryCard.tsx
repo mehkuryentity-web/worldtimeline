@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { generateBriefing } from "@/lib/news.functions";
 import { useAppState } from "@/hooks/use-app-state";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase } from "../lib/supabaseClient";
 
 function hashHeadlines(headlines: string[]) {
   return headlines.slice(0, 5).join("|");
@@ -21,7 +20,10 @@ export function AISummaryCard() {
       const data = await res.json();
 
       const headlines: string[] =
-        (data?.items ?? []).slice(0, 6).map((i: any) => i.title) || [];
+        (data?.items ?? [])
+          .slice(0, 6)
+          .map((i: any) => i.title)
+          .filter(Boolean);
 
       if (!headlines.length) {
         setSummary("Waiting for live newsroom signals...");
@@ -31,53 +33,34 @@ export function AISummaryCard() {
       const hash = hashHeadlines(headlines);
 
       // 1. CHECK CACHE FIRST
-      const cached = await supabase
+      const { data: cached } = await supabase
         .from("ai_briefings")
         .select("summary")
         .eq("headlines_hash", hash)
         .maybeSingle();
 
-      if (cached?.data?.summary) {
-        setSummary(cached.data.summary);
-
-        // background refresh (silent)
-        generateIfNeeded(headlines, hash);
+      if (cached?.summary) {
+        setSummary(cached.summary);
         return;
       }
 
-      // 2. FIRST USER ONLY: GENERATE + SHOW IMMEDIATELY
-      const result = await generateBriefing({ headlines, userName });
+      // 2. FALLBACK: FETCH PREGENERATED / BACKEND HANDLED BRIEFING
+      const fallback = await supabase
+        .from("ai_briefings")
+        .select("summary")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-      setSummary(result.summary);
+      if (fallback?.data?.summary) {
+        setSummary(fallback.data.summary);
+        return;
+      }
 
-      await supabase.from("ai_briefings").insert({
-        summary: result.summary,
-        headlines_hash: hash,
-        country: "GLOBAL",
-      });
+      setSummary("Briefing is being prepared...");
     } catch (e) {
       setSummary("Live briefing temporarily unavailable.");
     }
-  }
-
-  async function generateIfNeeded(headlines: string[], hash: string) {
-    const exists = await supabase
-      .from("ai_briefings")
-      .select("id")
-      .eq("headlines_hash", hash)
-      .maybeSingle();
-
-    if (exists.data) return;
-
-    const result = await generateBriefing({ headlines, userName });
-
-    setSummary(result.summary);
-
-    await supabase.from("ai_briefings").insert({
-      summary: result.summary,
-      headlines_hash: hash,
-      country: "GLOBAL",
-    });
   }
 
   useEffect(() => {
@@ -100,7 +83,6 @@ export function AISummaryCard() {
         </button>
       </div>
 
-      {/* NO LOADING STATE ANYMORE */}
       <div className="text-sm leading-relaxed">
         {summary || "Loading briefing..."}
       </div>
