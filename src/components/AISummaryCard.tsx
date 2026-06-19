@@ -2,13 +2,10 @@ import { useEffect, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { generateBriefing } from "@/lib/news.functions";
 import { buildBriefing } from "@/lib/intelligence/briefing";
+import { getHybridHeadlines } from "@/lib/intelligence/hybrid";
 import { useAppState } from "@/hooks/use-app-state";
 
-interface Props {
-  headlines: string[];
-}
-
-export function AISummaryCard({ headlines }: Props) {
+export function AISummaryCard() {
   const { state } = useAppState();
 
   const [summary, setSummary] = useState("");
@@ -22,14 +19,17 @@ export function AISummaryCard({ headlines }: Props) {
     setLoading(true);
 
     try {
-      // metadata only (no narrative role anymore)
+      // 🔥 STEP 1: GET REAL INTELLIGENCE FEED (Supabase + Live + deduped)
+      const headlines = await getHybridHeadlines("Top", "GLOBAL");
+
+      // 🔥 STEP 2: metadata layer (no narration logic)
       buildBriefing({
         headlines,
         userName,
         country: "GLOBAL",
       });
 
-      // REAL NARRATIVE COMES FROM GEMINI
+      // 🔥 STEP 3: AI GENERATION (Gemini)
       const result = await generateBriefing({ headlines });
 
       setSummary(result.summary);
@@ -44,9 +44,9 @@ export function AISummaryCard({ headlines }: Props) {
   // initial + refresh trigger
   useEffect(() => {
     load();
-  }, [headlines, manualRefresh]);
+  }, [manualRefresh]);
 
-  // countdown timer (5 min)
+  // countdown timer (5 min auto refresh)
   useEffect(() => {
     const interval = setInterval(() => {
       setTime((t) => {
@@ -67,7 +67,9 @@ export function AISummaryCard({ headlines }: Props) {
   }
 
   const formatTime = (s: number) =>
-    `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+    `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(
+      s % 60
+    ).padStart(2, "0")}`;
 
   return (
     <div className="rounded-xl border border-border bg-surface-1 p-4 space-y-3">
@@ -90,7 +92,7 @@ export function AISummaryCard({ headlines }: Props) {
       {loading ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin" />
-          Composing live briefing...
+          Composing intelligence briefing...
         </div>
       ) : (
         <div className="text-sm leading-relaxed text-foreground/90">
