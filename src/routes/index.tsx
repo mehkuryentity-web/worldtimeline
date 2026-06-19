@@ -118,9 +118,9 @@ function Home() {
 
   const now = Date.now();
 
-  // -----------------------------
-  // WINDOW CALCULATION
-  // -----------------------------
+  // -------------------------
+  // WINDOW LOGIC
+  // -------------------------
   let windowMs = 0;
 
   switch (mode) {
@@ -149,18 +149,20 @@ function Home() {
       windowMs = 0;
   }
 
-  // -----------------------------
-  // FILTER + SORT
-  // -----------------------------
+  // -------------------------
+  // FILTERING RULES
+  // -------------------------
   let items: NewsItem[] = [];
 
   if (mode === "all") {
+    // newest → oldest
     items = [...allItems].sort(
       (a, b) =>
         new Date(b.publishedAt).getTime() -
         new Date(a.publishedAt).getTime()
     );
   } else {
+    // oldest → newest within window
     const filtered = allItems.filter((item) => {
       const age = now - new Date(item.publishedAt).getTime();
       return age <= windowMs;
@@ -173,9 +175,9 @@ function Home() {
     );
   }
 
-  // -----------------------------
+  // -------------------------
   // PRELOAD ENGINE
-  // -----------------------------
+  // -------------------------
   useEffect(() => {
     if (!items.length) return;
 
@@ -204,6 +206,10 @@ function Home() {
       enqueueArticles(items.slice(0, 12));
     }
   }, [items]);
+
+  const isCustomValid =
+    customRange.hours.trim() !== "" ||
+    customRange.minutes.trim() !== "";
 
   const showCustom = mode === "custom";
 
@@ -247,9 +253,9 @@ function Home() {
               </select>
             </div>
 
-            {/* CUSTOM INPUTS */}
+            {/* CUSTOM INPUT */}
             {showCustom && (
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-center">
                 <input
                   className="border px-2 py-1 text-xs w-20"
                   placeholder="hrs"
@@ -273,6 +279,21 @@ function Home() {
                     }))
                   }
                 />
+
+                <button
+                  disabled={!isCustomValid}
+                  className={`text-xs border px-2 py-1 rounded ${
+                    isCustomValid
+                      ? "opacity-100"
+                      : "opacity-40 cursor-not-allowed"
+                  }`}
+                  onClick={() => {
+                    if (!isCustomValid) return;
+                    setMode("custom");
+                  }}
+                >
+                  Apply
+                </button>
               </div>
             )}
           </div>
