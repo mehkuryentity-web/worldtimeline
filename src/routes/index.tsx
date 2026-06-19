@@ -40,10 +40,14 @@ interface ApiNewsItem {
   image?: string;
 }
 
-type TimeMode =
-  | number
+type Mode =
   | "all"
-  | { hours: string; minutes: string };
+  | "5m"
+  | "10m"
+  | "30m"
+  | "1h"
+  | "24h"
+  | "custom";
 
 function Home() {
   const [category, setCategory] = useState<Category>("Top");
@@ -53,10 +57,9 @@ function Home() {
     () => state.country ?? "GLOBAL"
   );
 
-  // DEFAULT = ALL NEWS
-  const [timeMode, setTimeMode] = useState<TimeMode>("all");
+  const [mode, setMode] = useState<Mode>("all");
 
-  const [customInput, setCustomInput] = useState({
+  const [customRange, setCustomRange] = useState({
     hours: "",
     minutes: "",
   });
@@ -115,40 +118,49 @@ function Home() {
 
   const now = Date.now();
 
-  // ---------------------------
-  // RESOLVE WINDOW
-  // ---------------------------
+  // -----------------------------
+  // WINDOW CALCULATION
+  // -----------------------------
   let windowMs = 0;
 
-  if (typeof timeMode === "number") {
-    windowMs = timeMode;
-  } else if (timeMode !== "all") {
-    windowMs =
-      Number(timeMode.hours || 0) * 3600000 +
-      Number(timeMode.minutes || 0) * 60000;
+  switch (mode) {
+    case "5m":
+      windowMs = 5 * 60 * 1000;
+      break;
+    case "10m":
+      windowMs = 10 * 60 * 1000;
+      break;
+    case "30m":
+      windowMs = 30 * 60 * 1000;
+      break;
+    case "1h":
+      windowMs = 60 * 60 * 1000;
+      break;
+    case "24h":
+      windowMs = 24 * 60 * 60 * 1000;
+      break;
+    case "custom":
+      windowMs =
+        Number(customRange.hours || 0) * 3600000 +
+        Number(customRange.minutes || 0) * 60000;
+      break;
+    case "all":
+    default:
+      windowMs = 0;
   }
 
-  const isAllNews = timeMode === "all";
-
+  // -----------------------------
+  // FILTER + SORT
+  // -----------------------------
   let items: NewsItem[] = [];
 
-  // ---------------------------
-  // ALL NEWS MODE
-  // newest → oldest
-  // ---------------------------
-  if (isAllNews) {
+  if (mode === "all") {
     items = [...allItems].sort(
       (a, b) =>
         new Date(b.publishedAt).getTime() -
         new Date(a.publishedAt).getTime()
     );
-  }
-
-  // ---------------------------
-  // TIME FILTER MODE
-  // oldest → newest within window
-  // ---------------------------
-  else {
+  } else {
     const filtered = allItems.filter((item) => {
       const age = now - new Date(item.publishedAt).getTime();
       return age <= windowMs;
@@ -161,9 +173,9 @@ function Home() {
     );
   }
 
-  // ---------------------------
+  // -----------------------------
   // PRELOAD ENGINE
-  // ---------------------------
+  // -----------------------------
   useEffect(() => {
     if (!items.length) return;
 
@@ -193,7 +205,7 @@ function Home() {
     }
   }, [items]);
 
-  const showCustom = timeMode !== "all" && typeof timeMode !== "number";
+  const showCustom = mode === "custom";
 
   return (
     <div className="min-h-screen bg-background pb-28">
@@ -213,46 +225,38 @@ function Home() {
               <Timer className="h-3 w-3" />
 
               <select
-                value={
-                  timeMode === "all"
-                    ? "all"
-                    : typeof timeMode === "number"
-                    ? timeMode
-                    : "custom"
-                }
+                value={mode}
                 onChange={(e) => {
-                  const v = e.target.value;
+                  const v = e.target.value as Mode;
 
-                  if (v === "all") {
-                    setTimeMode("all");
-                  } else if (v === "custom") {
-                    setTimeMode({ hours: "", minutes: "" });
-                  } else {
-                    setTimeMode(Number(v));
+                  if (v === "custom") {
+                    setCustomRange({ hours: "", minutes: "" });
                   }
+
+                  setMode(v);
                 }}
                 className="text-xs border rounded px-2 py-1"
               >
                 <option value="all">All News</option>
-                <option value={300000}>5 min</option>
-                <option value={600000}>10 min</option>
-                <option value={1800000}>30 min</option>
-                <option value={3600000}>1 hour</option>
-                <option value={86400000}>24 hours</option>
+                <option value="5m">5 min</option>
+                <option value="10m">10 min</option>
+                <option value="30m">30 min</option>
+                <option value="1h">1 hour</option>
+                <option value="24h">24 hours</option>
                 <option value="custom">Custom</option>
               </select>
             </div>
 
-            {/* CUSTOM RANGE */}
+            {/* CUSTOM INPUTS */}
             {showCustom && (
               <div className="flex gap-2">
                 <input
                   className="border px-2 py-1 text-xs w-20"
                   placeholder="hrs"
-                  value={(timeMode as any).hours}
+                  value={customRange.hours}
                   onChange={(e) =>
-                    setTimeMode((prev: any) => ({
-                      ...prev,
+                    setCustomRange((p) => ({
+                      ...p,
                       hours: e.target.value,
                     }))
                   }
@@ -261,26 +265,14 @@ function Home() {
                 <input
                   className="border px-2 py-1 text-xs w-20"
                   placeholder="min"
-                  value={(timeMode as any).minutes}
+                  value={customRange.minutes}
                   onChange={(e) =>
-                    setTimeMode((prev: any) => ({
-                      ...prev,
+                    setCustomRange((p) => ({
+                      ...p,
                       minutes: e.target.value,
                     }))
                   }
                 />
-
-                <button
-                  className="text-xs border px-2 py-1 rounded"
-                  onClick={() => {
-                    const h = Number((timeMode as any).hours || 0);
-                    const m = Number((timeMode as any).minutes || 0);
-
-                    setTimeMode(h * 3600000 + m * 60000);
-                  }}
-                >
-                  Apply
-                </button>
               </div>
             )}
           </div>
