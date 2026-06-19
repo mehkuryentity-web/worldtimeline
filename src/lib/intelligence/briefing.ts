@@ -6,8 +6,13 @@ export interface BriefingInput {
 
 /**
  * FINAL ROLE:
- * This file no longer generates narrative.
- * It only provides lightweight metadata.
+ * This module does NOT generate narrative.
+ * It only normalizes + enriches input data for AI consumption.
+ *
+ * It is now compatible with:
+ * - Supabase memory feeds
+ * - Live API feeds
+ * - Hybrid merged feeds
  */
 
 export function buildBriefing(input: BriefingInput) {
@@ -21,16 +26,37 @@ export function buildBriefing(input: BriefingInput) {
       ? input.country
       : "global";
 
-  const headlines = input.headlines || [];
+  const headlines = Array.isArray(input.headlines)
+    ? input.headlines.filter(Boolean)
+    : [];
+
+  // lightweight but useful signal layer
+  const signals = {
+    totalHeadlines: headlines.length,
+    hasContent: headlines.length > 0,
+    density:
+      headlines.length > 20
+        ? "high"
+        : headlines.length > 5
+        ? "medium"
+        : "low",
+    urgencyHint:
+      headlines.length > 0 && headlines.length <= 5
+        ? "focused"
+        : "broad",
+  };
 
   return {
     identity,
 
-    // lightweight context only (NOT narration)
     context: {
       country,
-      count: headlines.length,
-      hasContent: headlines.length > 0,
+      ...signals,
+    },
+
+    // AI-friendly raw input (important for Gemini / briefing engine)
+    payload: {
+      headlines,
     },
   };
 }
