@@ -220,9 +220,7 @@ function Home() {
       <Ticker items={items.slice(0, 8).map((i) => i.title)} />
 
       <main className="mx-auto max-w-md space-y-4 px-4 pt-4 pb-6">
-        <div className="p-4 border rounded">
-  Home is stable
-</div>
+        <AISummaryCard headlines={items.slice(0, 6).map((i) => i.title)} />
 
         {/* TIME SELECTOR */}
         <div className="flex items-center justify-between gap-2">
