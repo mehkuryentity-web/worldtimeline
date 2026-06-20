@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { generateBriefing } from "@/lib/news.functions";
 import { useAppState } from "@/hooks/use-app-state";
-import { supabase } from "../lib/supabaseClient";
+import { supabase } from "@/lib/supabaseClient";
 
 function hashHeadlines(headlines: string[]) {
   return headlines.slice(0, 5).join("|");
@@ -10,68 +11,79 @@ function hashHeadlines(headlines: string[]) {
 export function AISummaryCard() {
   const { state } = useAppState();
 
-  const [summary, setSummary] = useState<string>("Loading briefing...");
-  const [loading, setLoading] = useState(false);
+  const [summary, setSummary] = useState<string>("");
+  const [loading, setLoading] = useState(true);
 
   const userName = state?.user?.name ?? null;
 
   async function load() {
-    console.log("STEP 1: load started");
-
     setLoading(true);
 
     try {
+      // Fetch news items
       const res = await fetch("/api/news?category=Top&country=GLOBAL");
-
-      console.log("STEP 2: fetch status", res.status);
-
       const data = await res.json();
 
-      console.log("STEP 3: data received", data);
-
       const headlines: string[] =
-        (data?.items ?? [])
-          .slice(0, 6)
-          .map((i: any) => i.title)
-          .filter(Boolean);
-
-      console.log("STEP 4: headlines", headlines);
+        (data?.items ?? []).slice(0, 6).map((i: any) => i.title) || [];
 
       if (!headlines.length) {
-        setSummary("Waiting for newsroom signals...");
+        setSummary("Waiting for live newsroom signals...");
         return;
       }
 
       const hash = hashHeadlines(headlines);
 
-      // SAFE SUPABASE CHECK (wrapped so it cannot crash UI)
-      let cachedSummary = null;
+      // Check cache
+      const cached = await supabase
+        .from("ai_briefings")
+        .select("summary")
+        .eq("headlines_hash", hash)
+        .maybeSingle();
 
-      try {
-        const { data: cached } = await supabase
-          .from("ai_briefings")
-          .select("summary")
-          .eq("headlines_hash", hash)
-          .maybeSingle();
+      if (cached?.data?.summary) {
+        setSummary(cached.data.summary);
 
-        cachedSummary = cached?.summary ?? null;
-      } catch (e) {
-        console.log("Supabase cache check failed:", e);
-      }
-
-      if (cachedSummary) {
-        setSummary(cachedSummary);
+        // Background refresh (silent)
+        generateIfNeeded(headlines, hash);
         return;
       }
 
-      // fallback display (no AI calls here anymore)
-      setSummary(headlines.join(" • "));
+      // First user only: generate and show immediately
+      const result = await generateBriefing({ headlines, userName });
+
+      setSummary(result.summary);
+
+      await supabase.from("ai_briefings").insert({
+        summary: result.summary,
+        headlines_hash: hash,
+        country: "GLOBAL",
+      });
     } catch (e) {
-      console.log("ERROR CAUGHT IN LOAD:", e);
-      setSummary("Failed to load briefing data");
+      setSummary("Live briefing temporarily unavailable.");
     } finally {
       setLoading(false);
     }
+  }
+
+  async function generateIfNeeded(headlines: string[], hash: string) {
+    const exists = await supabase
+      .from("ai_briefings")
+      .select("id")
+      .eq("headlines_hash", hash)
+      .maybeSingle();
+
+    if (exists.data) return;
+
+    const result = await generateBriefing({ headlines, userName });
+
+    setSummary(result.summary);
+
+    await supabase.from("ai_briefings").insert({
+      summary: result.summary,
+      headlines_hash: hash,
+      country: "GLOBAL",
+    });
   }
 
   useEffect(() => {
@@ -95,7 +107,11 @@ export function AISummaryCard() {
       </div>
 
       <div className="text-sm leading-relaxed">
-        {loading ? "Loading..." : summary}
+        {loading ? (
+          <div>Loading briefing...</div>
+        ) : (
+          <p>{summary}</p>
+        )}
       </div>
     </div>
   );
