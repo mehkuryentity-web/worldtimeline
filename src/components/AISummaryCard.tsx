@@ -16,17 +16,26 @@ export function AISummaryCard() {
   const userName = state?.user?.name ?? null;
 
   async function load() {
+    console.log("STEP 1: load started");
+
     setLoading(true);
 
     try {
       const res = await fetch("/api/news?category=Top&country=GLOBAL");
+
+      console.log("STEP 2: fetch status", res.status);
+
       const data = await res.json();
+
+      console.log("STEP 3: data received", data);
 
       const headlines: string[] =
         (data?.items ?? [])
           .slice(0, 6)
           .map((i: any) => i.title)
           .filter(Boolean);
+
+      console.log("STEP 4: headlines", headlines);
 
       if (!headlines.length) {
         setSummary("Waiting for newsroom signals...");
@@ -35,35 +44,31 @@ export function AISummaryCard() {
 
       const hash = hashHeadlines(headlines);
 
-      // 1. TRY CACHE FIRST
-      const { data: cached, error } = await supabase
-        .from("ai_briefings")
-        .select("summary")
-        .eq("headlines_hash", hash)
-        .maybeSingle();
+      // SAFE SUPABASE CHECK (wrapped so it cannot crash UI)
+      let cachedSummary = null;
 
-      if (cached?.summary) {
-        setSummary(cached.summary);
+      try {
+        const { data: cached } = await supabase
+          .from("ai_briefings")
+          .select("summary")
+          .eq("headlines_hash", hash)
+          .maybeSingle();
+
+        cachedSummary = cached?.summary ?? null;
+      } catch (e) {
+        console.log("Supabase cache check failed:", e);
+      }
+
+      if (cachedSummary) {
+        setSummary(cachedSummary);
         return;
       }
 
-      // 2. FALLBACK TO LATEST AVAILABLE BRIEFING
-      const { data: latest } = await supabase
-        .from("ai_briefings")
-        .select("summary")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (latest?.summary) {
-        setSummary(latest.summary);
-        return;
-      }
-
-      // 3. FINAL FALLBACK
-      setSummary("Briefing is being prepared in the background...");
+      // fallback display (no AI calls here anymore)
+      setSummary(headlines.join(" • "));
     } catch (e) {
-      setSummary("Live briefing temporarily unavailable.");
+      console.log("ERROR CAUGHT IN LOAD:", e);
+      setSummary("Failed to load briefing data");
     } finally {
       setLoading(false);
     }
