@@ -14,7 +14,8 @@ export function AISummaryCard() {
 
   const userName = state?.user?.name ?? null;
 
-  async function load() {
+  async function load() { 
+    console.log("AISummaryCard loaded");
     try {
       const res = await fetch("/api/news?category=Top&country=GLOBAL");
       const data = await res.json();
