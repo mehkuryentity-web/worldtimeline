@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/trigger-briefing",
+      "schedule": "*/10 * * * *"
+    }
+  ]
+}
