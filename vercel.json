@@ -1,7 +1,7 @@
 {
   "crons": [
     {
-      "path": "/trigger-briefing",
+      "path": "/api/trigger-briefing",
       "schedule": "*/10 * * * *"
     }
   ]
