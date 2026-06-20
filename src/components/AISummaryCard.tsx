@@ -27,8 +27,9 @@ export function AISummaryCard({ headlines = [] }: { headlines: string[] }) {
   }
 
   useEffect(() => {
-    load();
-  }, []);
+  if (!headlines || headlines.length < 3) return;
+  load();
+}, [headlines]);
 
   return (
     <div className="rounded-xl border p-4 space-y-3">
