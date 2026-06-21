@@ -10,14 +10,15 @@ export interface UnifiedNewsItem {
 }
 
 /**
- * HYBRID ENGINE (SINGLE SOURCE OF TRUTH)
- *
- * Responsibilities:
- * - Merge Supabase memory + live API
- * - Deduplicate intelligently
- * - Sort by recency
- * - Output clean AI-ready headlines
+ * SIMPLE IN-MEMORY CACHE (per session)
+ * prevents re-fetch flicker
  */
+let cache: {
+  headlines: string[];
+  timestamp: number;
+} | null = null;
+
+const CACHE_TTL = 1000 * 60 * 5; // 5 minutes
 
 function normalize(item: any): UnifiedNewsItem | null {
   if (!item) return null;
@@ -25,54 +26,85 @@ function normalize(item: any): UnifiedNewsItem | null {
   return {
     id: item.id ?? item.url ?? item.title,
     title: item.title,
-    publishedAt: item.publishedAt ?? item.published_at ?? new Date().toISOString(),
+    publishedAt:
+      item.publishedAt ?? item.published_at ?? new Date().toISOString(),
     source: item.source,
     category: item.category,
   };
 }
 
+/**
+ * HYBRID ENGINE (NO FAIL MODE)
+ */
 export async function getHybridHeadlines(
   category: string,
   country: string
 ): Promise<string[]> {
-  // 1. Pull memory (Supabase)
-  const memory = await fetchNewsMemory(50);
+  const now = Date.now();
 
-  // 2. Pull live (API)
-  const live = await fetchLiveNews(category, country);
+  /**
+   * 1. RETURN CACHE INSTANTLY (NO LOADING STATE)
+   */
+  if (cache && now - cache.timestamp < CACHE_TTL) {
+    return cache.headlines;
+  }
 
-  // 3. Merge into one stream
-  const combined = [...memory, ...live];
+  /**
+   * 2. MEMORY FETCH (FASTEST RELIABLE SOURCE)
+   */
+  let memory: any[] = [];
+  try {
+    memory = await fetchNewsMemory(50);
+  } catch (e) {
+    console.warn("Memory fetch failed:", e);
+    memory = [];
+  }
 
-  // 4. Deduplicate using stable map
+  /**
+   * 3. START LIVE FETCH IN BACKGROUND (DO NOT BLOCK UI)
+   */
+  let live: any[] = [];
+  fetchLiveNews(category, country)
+    .then((res) => {
+      live = res ?? [];
+    })
+    .catch((err) => {
+      console.warn("Live news failed (ignored):", err);
+      live = [];
+    });
+
+  /**
+   * 4. BUILD BASE STREAM IMMEDIATELY (NO WAIT FOR LIVE)
+   */
+  const combined = [...(memory ?? [])];
+
   const map = new Map<string, UnifiedNewsItem>();
 
   for (const raw of combined) {
     const item = normalize(raw);
     if (!item || !item.title) continue;
 
-    // Prefer most recent version if duplicates exist
-    const existing = map.get(item.id);
-
-    if (!existing) {
-      map.set(item.id, item);
-    } else {
-      const existingTime = new Date(existing.publishedAt).getTime();
-      const newTime = new Date(item.publishedAt).getTime();
-
-      if (newTime > existingTime) {
-        map.set(item.id, item);
-      }
-    }
+    map.set(item.id, item);
   }
 
-  // 5. Sort newest → oldest
   const sorted = Array.from(map.values()).sort(
     (a, b) =>
       new Date(b.publishedAt).getTime() -
       new Date(a.publishedAt).getTime()
   );
 
-  // 6. Return AI-ready headlines
-  return sorted.map((item) => item.title);
+  const headlines = sorted.map((item) => item.title);
+
+  /**
+   * 5. UPDATE CACHE
+   */
+  cache = {
+    headlines,
+    timestamp: now,
+  };
+
+  /**
+   * 6. RETURN INSTANT RESULT (NO LOADING DELAY)
+   */
+  return headlines;
 }
