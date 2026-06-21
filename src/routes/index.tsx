@@ -11,7 +11,6 @@ import { NewsCard } from "@/components/NewsCard";
 import { Ticker } from "@/components/Ticker";
 
 import {
-  CATEGORIES,
   type Category,
   type NewsItem,
   cacheArticles,
@@ -76,15 +75,27 @@ function Home() {
     award("open_app");
   }, []);
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["news", country, category],
     queryFn: async () => {
-      const res = await fetch(
-        `/api/news?category=${encodeURIComponent(category)}&country=${encodeURIComponent(country)}`
-      );
-      return res.json();
+      try {
+        const res = await fetch(
+          `/api/news?category=${encodeURIComponent(category)}&country=${encodeURIComponent(country)}`
+        );
+
+        if (!res.ok) {
+          console.warn("News API failed:", res.status);
+          return { items: [] };
+        }
+
+        const json = await res.json();
+        return json ?? { items: [] };
+      } catch (e) {
+        console.warn("News fetch crashed:", e);
+        return { items: [] };
+      }
     },
-    refetchInterval: false,
+    retry: false,
     staleTime: 5 * 60 * 1000,
   });
 
@@ -118,9 +129,6 @@ function Home() {
 
   const now = Date.now();
 
-  // -------------------------
-  // WINDOW LOGIC
-  // -------------------------
   let windowMs = 0;
 
   switch (mode) {
@@ -149,20 +157,15 @@ function Home() {
       windowMs = 0;
   }
 
-  // -------------------------
-  // FILTERING RULES
-  // -------------------------
   let items: NewsItem[] = [];
 
   if (mode === "all") {
-    // newest → oldest
     items = [...allItems].sort(
       (a, b) =>
         new Date(b.publishedAt).getTime() -
         new Date(a.publishedAt).getTime()
     );
   } else {
-    // oldest → newest within window
     const filtered = allItems.filter((item) => {
       const age = now - new Date(item.publishedAt).getTime();
       return age <= windowMs;
@@ -175,9 +178,6 @@ function Home() {
     );
   }
 
-  // -------------------------
-  // PRELOAD ENGINE
-  // -------------------------
   useEffect(() => {
     if (!items.length) return;
 
@@ -222,7 +222,6 @@ function Home() {
       <main className="mx-auto max-w-md space-y-4 px-4 pt-4 pb-6">
         <AISummaryCard headlines={items.slice(0, 6).map((i) => i.title)} />
 
-        {/* TIME SELECTOR */}
         <div className="flex items-center justify-between gap-2">
           <CountrySelector value={country} onChange={setCountry} />
 
@@ -232,15 +231,7 @@ function Home() {
 
               <select
                 value={mode}
-                onChange={(e) => {
-                  const v = e.target.value as Mode;
-
-                  if (v === "custom") {
-                    setCustomRange({ hours: "", minutes: "" });
-                  }
-
-                  setMode(v);
-                }}
+                onChange={(e) => setMode(e.target.value as Mode)}
                 className="text-xs border rounded px-2 py-1"
               >
                 <option value="all">All News</option>
@@ -253,7 +244,6 @@ function Home() {
               </select>
             </div>
 
-            {/* CUSTOM INPUT */}
             {showCustom && (
               <div className="flex gap-2 items-center">
                 <input
@@ -279,21 +269,6 @@ function Home() {
                     }))
                   }
                 />
-
-                <button
-                  disabled={!isCustomValid}
-                  className={`text-xs border px-2 py-1 rounded ${
-                    isCustomValid
-                      ? "opacity-100"
-                      : "opacity-40 cursor-not-allowed"
-                  }`}
-                  onClick={() => {
-                    if (!isCustomValid) return;
-                    setMode("custom");
-                  }}
-                >
-                  Apply
-                </button>
               </div>
             )}
           </div>
@@ -310,10 +285,6 @@ function Home() {
             <Loader2 className="h-3 w-3 animate-spin" />
             Loading feed...
           </div>
-        )}
-
-        {(error as any) && (
-          <div className="text-xs text-red-500">Failed to load news</div>
         )}
 
         <div className="space-y-3">
