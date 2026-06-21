@@ -1,25 +1,37 @@
 import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { generateBriefing } from "@/lib/news.functions";
+import { createClient } from "@supabase/supabase-js";
 
-export function AISummaryCard({ headlines = [] }: { headlines: string[] }) {
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+export function AISummaryCard() {
   const [summary, setSummary] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   async function load() {
+    setLoading(true);
+
     try {
-      if (!headlines.length) {
-        setSummary("Waiting for live newsroom signals...");
+      // 1. READ FIRST (PRELOAD)
+      const { data } = await supabase
+        .from("ai_briefings")
+        .select("summary")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (data?.summary) {
+        setSummary(data.summary);
         return;
       }
 
-      setLoading(true);
-
-      const result = await generateBriefing({ headlines });
-
-      setSummary(result.summary);
+      // 2. fallback state only
+      setSummary("No briefing available yet.");
     } catch (e) {
-      console.error("AISummaryCard error:", e);
+      console.error(e);
       setSummary("Briefing temporarily unavailable.");
     } finally {
       setLoading(false);
@@ -27,9 +39,8 @@ export function AISummaryCard({ headlines = [] }: { headlines: string[] }) {
   }
 
   useEffect(() => {
-  if (!headlines || headlines.length < 3) return;
-  load();
-}, [headlines]);
+    load();
+  }, []);
 
   return (
     <div className="rounded-xl border p-4 space-y-3">
@@ -38,17 +49,14 @@ export function AISummaryCard({ headlines = [] }: { headlines: string[] }) {
           AI Briefing
         </div>
 
-        <button
-          onClick={load}
-          className="text-xs flex items-center gap-1"
-        >
+        <button onClick={load} className="text-xs flex items-center gap-1">
           <RefreshCw className="h-3 w-3" />
           Refresh
         </button>
       </div>
 
       <div className="text-sm leading-relaxed">
-        {loading ? "Composing briefing..." : summary || "Loading..."}
+        {loading ? "Loading latest briefing..." : summary}
       </div>
     </div>
   );
