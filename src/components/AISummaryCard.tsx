@@ -34,12 +34,9 @@ function getGreeting() {
 /* -------------------------
    COMPONENT
 --------------------------*/
-interface Props {
-  headlines: string[];
-}
-
-export function AISummaryCard({ headlines }: Props) {
+export function AISummaryCard() {
   const [text, setText] = useState<string>(() => {
+    // 🔥 INSTANT FIRST PAINT (NO NETWORK)
     const cached = getCache();
     return cached || `${getGreeting()} 👋 Preparing your briefing...`;
   });
@@ -47,38 +44,38 @@ export function AISummaryCard({ headlines }: Props) {
   useEffect(() => {
     let alive = true;
 
-    async function run() {
-      // STEP 1: ALWAYS show cache instantly (never block UI)
+    async function load() {
+      // STEP 1: if cache exists, STOP. no fetch. no flicker.
       const cached = getCache();
       if (cached) {
         setText(cached);
         return;
       }
 
-      // STEP 2: fetch briefing from Supabase edge function
+      // STEP 2: fetch briefing from Supabase Edge Function
       const res = await generateBriefing();
 
       if (!alive) return;
 
-      // STEP 3: only accept valid summary
-      if (res?.summary && res.summary.length > 10) {
+      // STEP 3: only accept valid response
+      if (res?.summary && res.summary.trim().length > 10) {
         setCache(res.summary);
         setText(res.summary);
         return;
       }
 
-      // STEP 4: HARD fallback (never show "waiting for signals")
-      setText(
-        `${getGreeting()} 👋 Live newsroom is syncing across global feeds. Stories are forming across markets, politics, and tech. Stay tuned.`
-      );
+      // STEP 4: HARD fallback (NEVER show "waiting for signals")
+      const fallback = `${getGreeting()} 👋 Live newsroom is syncing global updates across markets, politics, tech, and science. Stories are forming in real time.`;
+
+      setText(fallback);
     }
 
-    run();
+    load();
 
     return () => {
       alive = false;
     };
-  }, [headlines]);
+  }, []);
 
   return (
     <div className="rounded-xl border border-white/10 bg-black/60 p-4 text-white">
