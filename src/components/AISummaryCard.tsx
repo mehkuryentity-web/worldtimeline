@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
-import { generateBriefing } from "@/lib/news.functions";
 
 const CACHE_KEY = "wt:ai-briefing:v1";
 
 /**
- * Instant read (NO loading state dependency)
+ * Read cache instantly (no network)
  */
 function getCache(): string | null {
   try {
@@ -15,7 +14,7 @@ function getCache(): string | null {
 }
 
 /**
- * Persist briefing for instant next paint
+ * Save cache for instant next load
  */
 function setCache(value: string) {
   try {
@@ -23,42 +22,92 @@ function setCache(value: string) {
   } catch {}
 }
 
+/**
+ * Normalize ANY backend response shape
+ */
+function extractBriefing(data: any): string {
+  return (
+    data?.summary ||
+    data?.data?.summary ||
+    data?.message ||
+    data?.text ||
+    ""
+  );
+}
+
+/**
+ * Time-based greeting
+ */
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
+}
+
 interface Props {
   headlines: string[];
 }
 
 export function AISummaryCard({ headlines }: Props) {
-  // CRITICAL: never show fake placeholder as final UI state
+  const cached = getCache();
+
   const [text, setText] = useState<string>(() => {
-    const cached = getCache();
-    return cached ?? "Generating briefing...";
+    // ⚡ instant paint rule
+    return cached || "";
   });
 
   useEffect(() => {
     let alive = true;
 
     async function run() {
-      // If cache exists → NEVER fetch
-      const cached = getCache();
-      if (cached) {
-        setText(cached);
+      // 1. CACHE FIRST (NO FETCH)
+      const cachedNow = getCache();
+      if (cachedNow) {
+        setText(cachedNow);
         return;
       }
 
-      // No cache → generate once
-      const result = await generateBriefing({
-        headlines: headlines.slice(0, 5),
-      });
+      // 2. FETCH ONLY IF NO CACHE
+      try {
+        const res = await fetch(
+          "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/generate-briefing",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            },
+            body: JSON.stringify({
+              headlines: headlines.slice(0, 5),
+            }),
+          }
+        );
 
-      if (!alive) return;
+        const data = await res.json();
 
-      const summary = result?.summary?.trim();
+        if (!alive) return;
 
-      if (summary) {
-        setCache(summary);
-        setText(summary);
-      } else {
-        setText("Live briefing unavailable. Feed is still updating.");
+        const summary = extractBriefing(data);
+
+        if (summary && summary.trim().length > 0) {
+          const finalText =
+            `${greeting()}, ${summary.trim()} ` +
+            `That’s the pulse for now — fast, messy, and still unfolding.`;
+
+          setCache(finalText);
+          setText(finalText);
+        } else {
+          setText(
+            `${greeting()}, the newsroom is quiet for a moment — updates are still forming.`
+          );
+        }
+      } catch {
+        if (!alive) return;
+
+        setText(
+          `${greeting()}, live briefing is temporarily unavailable — but the feed continues to move.`
+        );
       }
     }
 
