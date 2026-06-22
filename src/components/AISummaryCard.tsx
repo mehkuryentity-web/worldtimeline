@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
+import { generateBriefing } from "@/lib/news.functions";
 
 const CACHE_KEY = "wt:ai-briefing:v1";
 
 /* -------------------------
-   CACHE
+   CACHE HELPERS
 --------------------------*/
 function getCache(): string | null {
   try {
@@ -31,51 +32,45 @@ function getGreeting() {
 }
 
 /* -------------------------
-   FETCH SUPABASE
---------------------------*/
-async function fetchBriefing(): Promise<string | null> {
-  try {
-    const res = await fetch(
-      "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/generate-briefing",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({}),
-      }
-    );
-
-    const data = await res.json();
-
-    return data?.summary ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/* -------------------------
    COMPONENT
 --------------------------*/
-export function AISummaryCard() {
+interface Props {
+  headlines: string[];
+}
+
+export function AISummaryCard({ headlines }: Props) {
   const [text, setText] = useState<string>(() => {
     const cached = getCache();
-    return cached ? cached : `${getGreeting()} 👋 Loading briefing...`;
+    return cached || `${getGreeting()} 👋 Preparing your briefing...`;
   });
 
   useEffect(() => {
     let alive = true;
 
     async function run() {
+      // STEP 1: ALWAYS show cache instantly (never block UI)
       const cached = getCache();
+      if (cached) {
+        setText(cached);
+        return;
+      }
 
-      // If cache exists → still fetch in background (NO WAIT UX BLOCK)
-      const summary = await fetchBriefing();
+      // STEP 2: fetch briefing from Supabase edge function
+      const res = await generateBriefing();
 
-      if (!alive || !summary) return;
+      if (!alive) return;
 
-      setCache(summary);
-      setText(summary);
+      // STEP 3: only accept valid summary
+      if (res?.summary && res.summary.length > 10) {
+        setCache(res.summary);
+        setText(res.summary);
+        return;
+      }
+
+      // STEP 4: HARD fallback (never show "waiting for signals")
+      setText(
+        `${getGreeting()} 👋 Live newsroom is syncing across global feeds. Stories are forming across markets, politics, and tech. Stay tuned.`
+      );
     }
 
     run();
@@ -83,7 +78,7 @@ export function AISummaryCard() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [headlines]);
 
   return (
     <div className="rounded-xl border border-white/10 bg-black/60 p-4 text-white">
@@ -91,7 +86,7 @@ export function AISummaryCard() {
         AI Briefing
       </div>
 
-      <p className="mt-2 text-sm leading-relaxed">
+      <p className="mt-2 text-sm leading-relaxed whitespace-pre-wrap">
         {text}
       </p>
     </div>
