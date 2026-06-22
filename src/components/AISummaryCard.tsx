@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
+import { generateBriefing } from "@/lib/news.functions";
 
 const CACHE_KEY = "wt:ai-briefing:v1";
 
 /**
- * Instant cache read (no network)
+ * Instant read (NO loading state dependency)
  */
-function getCachedBriefing(): string | null {
+function getCache(): string | null {
   try {
     return localStorage.getItem(CACHE_KEY);
   } catch {
@@ -14,38 +15,12 @@ function getCachedBriefing(): string | null {
 }
 
 /**
- * Persist briefing for instant reuse
+ * Persist briefing for instant next paint
  */
-function setCachedBriefing(text: string) {
+function setCache(value: string) {
   try {
-    localStorage.setItem(CACHE_KEY, text);
+    localStorage.setItem(CACHE_KEY, value);
   } catch {}
-}
-
-/**
- * Fetch AI briefing from Supabase function
- */
-async function fetchBriefing(headlines: string[]): Promise<string> {
-  try {
-    const res = await fetch(
-      "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/generate-briefing",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
-        body: JSON.stringify({ headlines }),
-      }
-    );
-
-    if (!res.ok) return "";
-
-    const data = await res.json();
-    return data?.summary || "";
-  } catch {
-    return "";
-  }
 }
 
 interface Props {
@@ -53,31 +28,37 @@ interface Props {
 }
 
 export function AISummaryCard({ headlines }: Props) {
-  const cached = getCachedBriefing();
-
+  // CRITICAL: never show fake placeholder as final UI state
   const [text, setText] = useState<string>(() => {
-    /**
-     * FIRST PAINT RULE:
-     * - If cache exists → show it instantly
-     * - If not → show neutral placeholder (NOT "AI CARD LOADED")
-     */
-    return cached || "…";
+    const cached = getCache();
+    return cached ?? "Generating briefing...";
   });
 
   useEffect(() => {
     let alive = true;
 
     async function run() {
-      // If cache exists → NEVER fetch on first render
-      if (cached) return;
+      // If cache exists → NEVER fetch
+      const cached = getCache();
+      if (cached) {
+        setText(cached);
+        return;
+      }
 
-      const briefing = await fetchBriefing(headlines);
+      // No cache → generate once
+      const result = await generateBriefing({
+        headlines: headlines.slice(0, 5),
+      });
 
       if (!alive) return;
 
-      if (briefing) {
-        setText(briefing);
-        setCachedBriefing(briefing);
+      const summary = result?.summary?.trim();
+
+      if (summary) {
+        setCache(summary);
+        setText(summary);
+      } else {
+        setText("Live briefing unavailable. Feed is still updating.");
       }
     }
 
