@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 
 const CACHE_KEY = "wt:ai-briefing:v1";
 
 /**
- * Read cached briefing instantly (no network)
+ * Instant cache read (no network)
  */
 function getCachedBriefing(): string | null {
   try {
@@ -15,7 +14,7 @@ function getCachedBriefing(): string | null {
 }
 
 /**
- * Save briefing for instant next load
+ * Persist briefing for instant reuse
  */
 function setCachedBriefing(text: string) {
   try {
@@ -24,7 +23,7 @@ function setCachedBriefing(text: string) {
 }
 
 /**
- * Fetch latest AI briefing from Supabase function
+ * Fetch AI briefing from Supabase function
  */
 async function fetchBriefing(headlines: string[]): Promise<string> {
   try {
@@ -40,10 +39,9 @@ async function fetchBriefing(headlines: string[]): Promise<string> {
       }
     );
 
-    if (!res.ok) throw new Error("Briefing fetch failed");
+    if (!res.ok) return "";
 
     const data = await res.json();
-
     return data?.summary || "";
   } catch {
     return "";
@@ -55,23 +53,27 @@ interface Props {
 }
 
 export function AISummaryCard({ headlines }: Props) {
+  const cached = getCachedBriefing();
+
   const [text, setText] = useState<string>(() => {
-    // 🔥 INSTANT FIRST PAINT
-    return getCachedBriefing() || "AI CARD LOADED";
+    /**
+     * FIRST PAINT RULE:
+     * - If cache exists → show it instantly
+     * - If not → show neutral placeholder (NOT "AI CARD LOADED")
+     */
+    return cached || "…";
   });
 
   useEffect(() => {
-    let mounted = true;
+    let alive = true;
 
     async function run() {
-      // 1. If cache exists, DO NOTHING (instant UX rule)
-      const cached = getCachedBriefing();
+      // If cache exists → NEVER fetch on first render
       if (cached) return;
 
-      // 2. Otherwise fetch once
       const briefing = await fetchBriefing(headlines);
 
-      if (!mounted) return;
+      if (!alive) return;
 
       if (briefing) {
         setText(briefing);
@@ -82,7 +84,7 @@ export function AISummaryCard({ headlines }: Props) {
     run();
 
     return () => {
-      mounted = false;
+      alive = false;
     };
   }, [headlines]);
 
