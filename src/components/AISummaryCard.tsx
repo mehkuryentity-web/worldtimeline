@@ -36,7 +36,6 @@ function getGreeting() {
 --------------------------*/
 export function AISummaryCard() {
   const [text, setText] = useState<string>(() => {
-    // 🔥 INSTANT FIRST PAINT (NO NETWORK)
     const cached = getCache();
     return cached || `${getGreeting()} 👋 Preparing your briefing...`;
   });
@@ -45,27 +44,31 @@ export function AISummaryCard() {
     let alive = true;
 
     async function load() {
-      // STEP 1: if cache exists, STOP. no fetch. no flicker.
+      // STEP 1: instant cache render (no fetch delay)
       const cached = getCache();
       if (cached) {
         setText(cached);
         return;
       }
 
-      // STEP 2: fetch briefing from Supabase Edge Function
+      // STEP 2: fetch Supabase briefing
       const res = await generateBriefing();
 
       if (!alive) return;
 
-      // STEP 3: only accept valid response
-      if (res?.summary && res.summary.trim().length > 10) {
-        setCache(res.summary);
-        setText(res.summary);
+      console.log("RAW_BRIEFING_RESULT:", res);
+
+      // STEP 3: strict validation (prevents fallback loops)
+      const summary = res?.summary;
+
+      if (typeof summary === "string" && summary.trim().length > 0) {
+        setCache(summary);
+        setText(summary);
         return;
       }
 
-      // STEP 4: HARD fallback (NEVER show "waiting for signals")
-      const fallback = `${getGreeting()} 👋 Live newsroom is syncing global updates across markets, politics, tech, and science. Stories are forming in real time.`;
+      // STEP 4: ONLY fallback (never "waiting for signals")
+      const fallback = `${getGreeting()} 👋 Global newsroom is active. Stories are developing across markets, politics, technology, and culture in real time.`;
 
       setText(fallback);
     }
