@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 
 const CACHE_KEY = "wt:ai-briefing:v1";
 
-/**
- * Read cache instantly (no network)
- */
+/* -----------------------------
+   CACHE LAYER (FAST PATH)
+------------------------------*/
 function getCache(): string | null {
   try {
     return localStorage.getItem(CACHE_KEY);
@@ -13,102 +13,82 @@ function getCache(): string | null {
   }
 }
 
-/**
- * Save cache for instant next load
- */
 function setCache(value: string) {
   try {
     localStorage.setItem(CACHE_KEY, value);
   } catch {}
 }
 
-/**
- * Normalize ANY backend response shape
- */
-function extractBriefing(data: any): string {
-  return (
-    data?.summary ||
-    data?.data?.summary ||
-    data?.message ||
-    data?.text ||
-    ""
-  );
-}
+/* -----------------------------
+   TIME-BASED GREETING
+------------------------------*/
+function getGreeting() {
+  const hour = new Date().getHours();
 
-/**
- * Time-based greeting
- */
-function greeting(): string {
-  const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 18) return "Good afternoon";
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
   return "Good evening";
 }
 
-interface Props {
-  headlines: string[];
+/* -----------------------------
+   FETCH BRIEFING (FALLBACK ONLY)
+------------------------------*/
+async function fetchBriefing(headlines: string[]) {
+  try {
+    const res = await fetch(
+      "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/generate-briefing",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ headlines }),
+      }
+    );
+
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    return data?.summary || null;
+  } catch {
+    return null;
+  }
 }
 
-export function AISummaryCard({ headlines }: Props) {
-  const cached = getCache();
-
+/* -----------------------------
+   MAIN COMPONENT
+------------------------------*/
+export function AISummaryCard({ headlines }: { headlines: string[] }) {
   const [text, setText] = useState<string>(() => {
-    // ⚡ instant paint rule
-    return cached || "";
+    const cached = getCache();
+    if (cached) return cached;
+
+    // IMPORTANT: no fake loading UI
+    return "";
   });
 
   useEffect(() => {
     let alive = true;
 
     async function run() {
-      // 1. CACHE FIRST (NO FETCH)
-      const cachedNow = getCache();
-      if (cachedNow) {
-        setText(cachedNow);
+      // STEP 1: ALWAYS TRUST CACHE FIRST
+      const cached = getCache();
+      if (cached) {
+        if (alive) setText(cached);
         return;
       }
 
-      // 2. FETCH ONLY IF NO CACHE
-      try {
-        const res = await fetch(
-          "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/generate-briefing",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-            },
-            body: JSON.stringify({
-              headlines: headlines.slice(0, 5),
-            }),
-          }
-        );
+      // STEP 2: FETCH ONLY IF NO CACHE
+      const briefing = await fetchBriefing(headlines);
 
-        const data = await res.json();
+      if (!alive || !briefing) return;
 
-        if (!alive) return;
+      const final =
+        `${getGreeting()}, ` +
+        `${briefing}`;
 
-        const summary = extractBriefing(data);
-
-        if (summary && summary.trim().length > 0) {
-          const finalText =
-            `${greeting()}, ${summary.trim()} ` +
-            `That’s the pulse for now — fast, messy, and still unfolding.`;
-
-          setCache(finalText);
-          setText(finalText);
-        } else {
-          setText(
-            `${greeting()}, the newsroom is quiet for a moment — updates are still forming.`
-          );
-        }
-      } catch {
-        if (!alive) return;
-
-        setText(
-          `${greeting()}, live briefing is temporarily unavailable — but the feed continues to move.`
-        );
-      }
+      setCache(final);
+      setText(final);
     }
 
     run();
@@ -118,15 +98,23 @@ export function AISummaryCard({ headlines }: Props) {
     };
   }, [headlines]);
 
+  /* -----------------------------
+     RENDER (NO LOADING STATE EVER)
+  ------------------------------*/
   return (
-    <div className="rounded-xl border border-border bg-surface-1 p-4">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-        AI Briefing
+    <div className="rounded-xl border border-border bg-black/60 p-4 text-white">
+      <div className="text-[10px] uppercase tracking-wider text-white/60 flex items-center gap-2">
+        ✦ AI Briefing
       </div>
 
-      <p className="mt-2 text-sm leading-relaxed text-foreground">
+      <p className="mt-2 text-sm leading-relaxed text-white/90">
         {text}
       </p>
+
+      {/* optional subtle footer indicator */}
+      <div className="mt-3 text-[10px] text-white/40 text-right">
+        live intelligence feed
+      </div>
     </div>
   );
 }
