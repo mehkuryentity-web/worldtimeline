@@ -28,7 +28,10 @@ export const fetchLiveNews = async (data: {
     }`;
 
     const response = await fetch(url);
-    if (!response.ok) throw new Error(`API error: ${response.statusText}`);
+
+    if (!response.ok) {
+      throw new Error(`API error: ${response.statusText}`);
+    }
 
     const result = await response.json();
 
@@ -46,10 +49,13 @@ export const fetchLiveNews = async (data: {
 };
 
 /* ---------------------------------------
-   GEMINI BRIEFING
+   SUPABASE AI BRIEFING (SINGLE SOURCE)
 ----------------------------------------*/
 
-export const generateBriefing = async (): Promise<{ summary: string; error?: string }> => {
+export const generateBriefing = async (): Promise<{
+  summary: string;
+  error?: string;
+}> => {
   try {
     const res = await fetch(
       "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/generate-briefing",
@@ -82,83 +88,8 @@ export const generateBriefing = async (): Promise<{ summary: string; error?: str
   }
 };
 
-  const GEMINI_API_KEY =
-    (import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) || "";
-
-  if (!GEMINI_API_KEY) {
-    return { summary: "Briefing system misconfigured.", error: "NO_KEY" };
-  }
-
-  const cleanHeadlines = data.headlines
-    .slice(0, 5)
-    .map((h) => h?.trim())
-    .filter(Boolean);
-
-  const userName =
-    typeof data.userName === "string" && data.userName.trim().length > 0
-      ? data.userName.trim()
-      : null;
-
-  const promptText = `
-You are a live newsroom editor.
-
-OUTPUT:
-- Greeting
-- ONE flowing paragraph
-- ONE witty closing line
-
-RULES:
-- No bullet points
-- No lists
-- No moral commentary
-- No fake identities
-- Newsroom tone with subtle wit
-
-Greeting rule:
-- If name exists: "Hi [Name],"
-- Else: "Hi,"
-
-HEADLINES:
-${cleanHeadlines.join("\n")}
-`;
-
-  const url =
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: promptText }] }],
-    }),
-  });
-
-  if (!res.ok) throw new Error(`Gemini API error: ${res.status}`);
-
-  const json = await res.json();
-
-  let summary =
-    json?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
-
-  if (!summary) {
-    return { summary: "Briefing failed to generate." };
-  }
-
-  if (!summary.startsWith("Hi")) {
-    summary = userName
-      ? `Hi ${userName}, ${summary}`
-      : `Hi, ${summary}`;
-  }
-
-  if (!summary.includes("\n")) {
-    summary += `\nToday continues beyond the headlines.`;
-  }
-
-  return { summary };
-};
-
 /* ---------------------------------------
-   PRELOADED SUMMARIES (SINGLE SOURCE)
+   PRELOADED SUMMARIES (EDGE FUNCTION)
 ----------------------------------------*/
 
 export const fetchPreloadedSummaries = async (
@@ -201,7 +132,9 @@ export const fetchPreloadedSummaries = async (
       body: JSON.stringify({ articles: normalized }),
     });
 
-    if (!response.ok) return {};
+    if (!response.ok) {
+      return {};
+    }
 
     const data = await response.json();
 
