@@ -49,13 +49,38 @@ export const fetchLiveNews = async (data: {
    GEMINI BRIEFING
 ----------------------------------------*/
 
-export const generateBriefing = async (data: {
-  headlines: string[];
-  userName?: string | null;
-}): Promise<{ summary: string; error?: string }> => {
-  if (!data?.headlines?.length) {
-    return { summary: "Waiting for live newsroom signals..." };
+export const generateBriefing = async (): Promise<{ summary: string; error?: string }> => {
+  try {
+    const res = await fetch(
+      "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/generate-briefing",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({}),
+      }
+    );
+
+    if (!res.ok) {
+      return {
+        summary: "",
+        error: "BRIEFING_FETCH_FAILED",
+      };
+    }
+
+    const data = await res.json();
+
+    return {
+      summary: data?.summary || "",
+    };
+  } catch (e) {
+    return {
+      summary: "",
+      error: e instanceof Error ? e.message : "UNKNOWN_ERROR",
+    };
   }
+};
 
   const GEMINI_API_KEY =
     (import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) || "";
