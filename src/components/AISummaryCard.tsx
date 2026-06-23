@@ -27,20 +27,18 @@ function setCache(value: string) {
 --------------------------*/
 function getGreeting(): string {
   const hour = new Date().getHours();
-
   if (hour < 12) return "Good morning";
   if (hour < 18) return "Good afternoon";
   return "Good evening";
 }
 
 /* -------------------------
-   GUEST ID (persists per device until login)
+   GUEST ID
 --------------------------*/
 function getOrCreateGuestId(): string {
   try {
     const existing = localStorage.getItem(GUEST_ID_KEY);
     if (existing) return existing;
-
     const fresh = `Guest_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
     localStorage.setItem(GUEST_ID_KEY, fresh);
     return fresh;
@@ -50,32 +48,19 @@ function getOrCreateGuestId(): string {
 }
 
 /* -------------------------
-   NAME RESOLUTION (logged in vs guest)
+   NAME RESOLUTION
 --------------------------*/
-async function resolveDisplayName(): Promise<{
-  name: string;
-  isGuest: boolean;
-}> {
+async function resolveDisplayName(): Promise<{ name: string; isGuest: boolean }> {
   try {
     const { data, error } = await supabase.auth.getUser();
-
     if (!error && data?.user) {
       const user = data.user;
-      const fromMetadata =
-        (user.user_metadata as any)?.full_name ||
-        (user.user_metadata as any)?.name ||
-        (user.user_metadata as any)?.username;
-
+      const fromMetadata = (user.user_metadata as any)?.full_name || (user.user_metadata as any)?.name || (user.user_metadata as any)?.username;
       const fallbackFromEmail = user.email ? user.email.split("@")[0] : null;
-
       const name = fromMetadata || fallbackFromEmail || "there";
-
       return { name, isGuest: false };
     }
-  } catch {
-    // fall through to guest
-  }
-
+  } catch {}
   return { name: getOrCreateGuestId(), isGuest: true };
 }
 
@@ -91,72 +76,49 @@ function buildBriefingText(name: string, summary: string): string {
    COMPONENT
 --------------------------*/
 export function AISummaryCard() {
-  const [text, setText] = useState<string>(
-    () => getCache() || "Preparing your briefing..."
-  );
+  const [text, setText] = useState<string>(() => getCache() || "Preparing your briefing...");
   const [isGuest, setIsGuest] = useState<boolean>(true);
 
   useEffect(() => {
     let alive = true;
 
     async function load() {
-      // STEP 1: instant cache render (no fetch delay)
+      // 1. Instant Render (Zero Wait)
       const cached = getCache();
-      if (cached) {
-        if (alive) setText(cached);
-      }
+      if (cached && alive) setText(cached);
 
-      // STEP 2: resolve who the user is
+      // 2. Resolve identity
       const { name, isGuest: guestFlag } = await resolveDisplayName();
       if (!alive) return;
       setIsGuest(guestFlag);
 
-      // STEP 3: fetch Supabase briefing
+      // 3. Fetch fresh data
       const res = await generateBriefing();
       if (!alive) return;
 
-      console.log("RAW_BRIEFING_RESULT:", res);
-
       const summary = res?.summary;
 
+      // 4. Update if we have valid fresh data
       if (typeof summary === "string" && summary.trim().length > 0) {
         const finalText = buildBriefingText(name, summary);
         setCache(finalText);
         setText(finalText);
-        return;
-      }
-
-      // STEP 4: fallback if Supabase briefing genuinely unavailable
-      // (only shown if there was no cache AND the fetch failed)
-      if (!cached) {
-        const fallback = `${getGreeting()} ${name}, your briefing is on its way. Check back in a moment.`;
-        setText(fallback);
-      }
+      } 
+      // Removed the 'if (!cached)' restriction so it updates even if old data was there
     }
 
     load();
-
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, []);
 
   return (
     <div className="rounded-xl border border-white/10 bg-black/60 p-4 text-white">
-      <div className="text-[10px] uppercase tracking-widest opacity-60">
-        AI Briefing
-      </div>
-
-      <p className="mt-2 text-sm leading-relaxed whitespace-pre-wrap">
-        {text}
-      </p>
-
+      <div className="text-[10px] uppercase tracking-widest opacity-60">AI Briefing</div>
+      <p className="mt-2 text-sm leading-relaxed whitespace-pre-wrap">{text}</p>
       {isGuest && (
         <button
           type="button"
-          onClick={() => {
-            window.location.href = "/login";
-          }}
+          onClick={() => { window.location.href = "/login"; }}
           className="mt-3 text-xs underline opacity-70 hover:opacity-100"
         >
           Sign in for a personalized briefing
