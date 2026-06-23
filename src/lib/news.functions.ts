@@ -13,28 +13,20 @@ export interface ApiNewsItem {
   publishedAt?: string;
 }
 
-/* ---------------------------------------
-   FETCH LIVE NEWS
-----------------------------------------*/
-
+/* --------------------------------------- FETCH LIVE NEWS ----------------------------------------*/
 export const fetchLiveNews = async (data: {
   category: string;
 }): Promise<{ items: ApiNewsItem[]; cached: boolean; error?: string }> => {
   try {
     const targetCategory = data.category === "all" ? "" : data.category;
-
     const url = `https://api.currentsapi.services/v1/latest-news?language=en${
       targetCategory ? `&category=${targetCategory}` : ""
     }`;
-
     const response = await fetch(url);
-
     if (!response.ok) {
       throw new Error(`API error: ${response.statusText}`);
     }
-
     const result = await response.json();
-
     return {
       items: (result.news || []) as ApiNewsItem[],
       cached: false,
@@ -48,10 +40,7 @@ export const fetchLiveNews = async (data: {
   }
 };
 
-/* ---------------------------------------
-   SUPABASE KEY HELPER
-----------------------------------------*/
-
+/* --------------------------------------- SUPABASE KEY HELPER ----------------------------------------*/
 function getSupabaseKey(): string {
   return (
     (import.meta.env && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) ||
@@ -60,7 +49,7 @@ function getSupabaseKey(): string {
   );
 }
 
-/* ---------------------------------------
+/* --------------------------------------- 
    SUPABASE AI BRIEFING (READ-ONLY FETCH)
    NOTE: This calls get-briefing, which only
    READS the latest cached row. The actual
@@ -70,7 +59,6 @@ function getSupabaseKey(): string {
    triggers generation, so there's never
    a wait for the user.
 ----------------------------------------*/
-
 export const generateBriefing = async (): Promise<{
   summary: string;
   cached?: boolean;
@@ -78,28 +66,22 @@ export const generateBriefing = async (): Promise<{
 }> => {
   try {
     const SUPABASE_KEY = getSupabaseKey();
-
-    const res = await fetch(
-      "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/get-briefing",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${SUPABASE_KEY}`,
-        },
-        body: JSON.stringify({}),
-      }
-    );
+    // Correct URL pointing to get-briefing
+    const res = await fetch("https://fadiusjtmtemxvysodie.supabase.co/functions/v1/get-briefing", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+      },
+      body: JSON.stringify({}),
+    });
 
     if (!res.ok) {
-      return {
-        summary: "",
-        error: `BRIEFING_FETCH_FAILED_${res.status}`,
-      };
+      return { summary: "", error: `BRIEFING_FETCH_FAILED_${res.status}` };
     }
 
     const data = await res.json();
-
+    // Corrected to look for 'summary' (the key your function returns)
     return {
       summary: data?.summary || "",
       cached: !!data?.cached,
@@ -112,19 +94,13 @@ export const generateBriefing = async (): Promise<{
   }
 };
 
-/* ---------------------------------------
-   PRELOADED SUMMARIES (EDGE FUNCTION)
-----------------------------------------*/
-
+/* --------------------------------------- PRELOADED SUMMARIES (EDGE FUNCTION) ----------------------------------------*/
 export const fetchPreloadedSummaries = async (
   items: ApiNewsItem[]
 ): Promise<Record<string, string>> => {
   try {
-    const url =
-      "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/article-summary";
-
+    const url = "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/article-summary";
     const SUPABASE_KEY = getSupabaseKey();
-
     if (!SUPABASE_KEY) return {};
 
     const normalized = items.map((item) => ({
@@ -140,8 +116,7 @@ export const fetchPreloadedSummaries = async (
         : item.category
         ? [item.category]
         : ["Top"],
-      published:
-        item.publishedAt || item.published || new Date().toISOString(),
+      published: item.publishedAt || item.published || new Date().toISOString(),
     }));
 
     const response = await fetch(url, {
@@ -156,9 +131,7 @@ export const fetchPreloadedSummaries = async (
     if (!response.ok) {
       return {};
     }
-
     const data = await response.json();
-
     return data?.summaries || {};
   } catch {
     return {};
