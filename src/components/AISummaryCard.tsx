@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { generateBriefing } from "@/lib/news.functions";
 import { supabase } from "@/integrations/supabase/client";
 
-const CACHE_KEY = "wt:ai-briefing:v2";
+const CACHE_KEY = "wt:ai-briefing:v1";
 const GUEST_ID_KEY = "wt:guest-id:v1";
 
 /* -------------------------
@@ -126,12 +126,12 @@ export function AISummaryCard() {
         return;
       }
 
-      // STEP 4: fallback if Supabase briefing genuinely unavailable
-      // (only shown if there was no cache AND the fetch failed)
-      if (!cached) {
-        const fallback = `${getGreeting()} ${name}, your briefing is on its way. Check back in a moment.`;
-        setText(fallback);
-      }
+      // TEMP DEBUG: show the actual error/response on screen
+      // (Remove this block once we identify the issue)
+      const debugInfo = `DEBUG → error: ${res?.error ?? "none"} | summary: "${
+        res?.summary
+      }" | raw: ${JSON.stringify(res)}`;
+      setText(debugInfo);
     }
 
     load();
