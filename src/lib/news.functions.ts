@@ -61,7 +61,14 @@ function getSupabaseKey(): string {
 }
 
 /* ---------------------------------------
-   SUPABASE AI BRIEFING (SINGLE SOURCE)
+   SUPABASE AI BRIEFING (READ-ONLY FETCH)
+   NOTE: This calls get-briefing, which only
+   READS the latest cached row. The actual
+   generation happens server-side via a
+   Supabase Cron job calling generate-briefing
+   every 12 minutes. The frontend never
+   triggers generation, so there's never
+   a wait for the user.
 ----------------------------------------*/
 
 export const generateBriefing = async (): Promise<{
@@ -73,7 +80,7 @@ export const generateBriefing = async (): Promise<{
     const SUPABASE_KEY = getSupabaseKey();
 
     const res = await fetch(
-      "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/generate-briefing",
+      "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/get-briefing",
       {
         method: "POST",
         headers: {
