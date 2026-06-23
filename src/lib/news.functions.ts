@@ -49,20 +49,36 @@ export const fetchLiveNews = async (data: {
 };
 
 /* ---------------------------------------
+   SUPABASE KEY HELPER
+----------------------------------------*/
+
+function getSupabaseKey(): string {
+  return (
+    (import.meta.env && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) ||
+    (window as any)._env_?.VITE_SUPABASE_PUBLISHABLE_KEY ||
+    ""
+  );
+}
+
+/* ---------------------------------------
    SUPABASE AI BRIEFING (SINGLE SOURCE)
 ----------------------------------------*/
 
 export const generateBriefing = async (): Promise<{
   summary: string;
+  cached?: boolean;
   error?: string;
 }> => {
   try {
+    const SUPABASE_KEY = getSupabaseKey();
+
     const res = await fetch(
       "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/generate-briefing",
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${SUPABASE_KEY}`,
         },
         body: JSON.stringify({}),
       }
@@ -71,7 +87,7 @@ export const generateBriefing = async (): Promise<{
     if (!res.ok) {
       return {
         summary: "",
-        error: "BRIEFING_FETCH_FAILED",
+        error: `BRIEFING_FETCH_FAILED_${res.status}`,
       };
     }
 
@@ -79,6 +95,7 @@ export const generateBriefing = async (): Promise<{
 
     return {
       summary: data?.summary || "",
+      cached: !!data?.cached,
     };
   } catch (e) {
     return {
@@ -99,10 +116,7 @@ export const fetchPreloadedSummaries = async (
     const url =
       "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/article-summary";
 
-    const SUPABASE_KEY =
-      (import.meta.env && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) ||
-      (window as any)._env_?.VITE_SUPABASE_PUBLISHABLE_KEY ||
-      "";
+    const SUPABASE_KEY = getSupabaseKey();
 
     if (!SUPABASE_KEY) return {};
 
