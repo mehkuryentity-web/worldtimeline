@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { generateBriefing } from "@/lib/news.functions";
 import { supabase } from "@/integrations/supabase/client";
 
-const CACHE_KEY = "wt:ai-briefing:v1";
+const CACHE_KEY = "wt:ai-briefing:v2";
 const GUEST_ID_KEY = "wt:guest-id:v1";
 
 /* -------------------------
