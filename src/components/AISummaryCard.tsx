@@ -2,23 +2,52 @@ import { useEffect, useState } from "react";
 import { generateBriefing } from "@/lib/news.functions";
 import { supabase } from "@/integrations/supabase/client";
 
-const CACHE_KEY = "wt:ai-briefing:v1";
+const CACHE_KEY_PREFIX = "wt:ai-briefing:v2:";
 const GUEST_ID_KEY = "wt:guest-id:v1";
+const ONE_HOUR_MS = 60 * 60 * 1000;
+
+interface CachedBriefing {
+  summary: string;
+  conclusion: string;
+  savedAt: number;
+}
+
+interface Props {
+  headlines: string[];
+  country: string;
+  category: string;
+  mode: string;
+}
 
 /* -------------------------
-   CACHE HELPERS
+   CACHE HELPERS (per combo, local fast-path only —
+   the real source of truth is Supabase; this just
+   avoids a network round-trip on quick re-renders)
 --------------------------*/
-function getCache(): string | null {
+function cacheKeyFor(country: string, category: string, mode: string): string {
+  return `${CACHE_KEY_PREFIX}${country}|${category}|${mode}`;
+}
+
+function getCache(key: string): CachedBriefing | null {
   try {
-    return localStorage.getItem(CACHE_KEY);
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedBriefing;
+    if (Date.now() - parsed.savedAt > ONE_HOUR_MS) return null;
+    return parsed;
   } catch {
     return null;
   }
 }
 
-function setCache(value: string) {
+function setCache(key: string, summary: string, conclusion: string) {
   try {
-    localStorage.setItem(CACHE_KEY, value);
+    const payload: CachedBriefing = {
+      summary,
+      conclusion,
+      savedAt: Date.now(),
+    };
+    localStorage.setItem(key, JSON.stringify(payload));
   } catch {}
 }
 
@@ -27,7 +56,6 @@ function setCache(value: string) {
 --------------------------*/
 function getGreeting(): string {
   const hour = new Date().getHours();
-
   if (hour < 12) return "Good morning";
   if (hour < 18) return "Good afternoon";
   return "Good evening";
@@ -67,7 +95,6 @@ async function resolveDisplayName(): Promise<{
         (user.user_metadata as any)?.username;
 
       const fallbackFromEmail = user.email ? user.email.split("@")[0] : null;
-
       const name = fromMetadata || fallbackFromEmail || "there";
 
       return { name, isGuest: false };
@@ -80,58 +107,52 @@ async function resolveDisplayName(): Promise<{
 }
 
 /* -------------------------
-   BRIEFING TEXT BUILDER
---------------------------*/
-function buildBriefingText(name: string, summary: string): string {
-  const greeting = `${getGreeting()} ${name},`;
-  return `${greeting}\n\n${summary}`;
-}
-
-/* -------------------------
    COMPONENT
 --------------------------*/
-export function AISummaryCard() {
-  const [text, setText] = useState<string>(
-    () => getCache() || "Preparing your briefing..."
-  );
+export function AISummaryCard({ headlines, country, category, mode }: Props) {
+  const [greetingName, setGreetingName] = useState<string>("there");
   const [isGuest, setIsGuest] = useState<boolean>(true);
+  const [summary, setSummary] = useState<string>("");
+  const [conclusion, setConclusion] = useState<string>("");
+  const [status, setStatus] = useState<"loading" | "ready" | "empty">(
+    "loading"
+  );
 
   useEffect(() => {
     let alive = true;
 
     async function load() {
-      // STEP 1: instant cache render (no fetch delay)
-      const cached = getCache();
-      if (cached) {
-        if (alive) setText(cached);
+      const key = cacheKeyFor(country, category, mode);
+
+      // STEP 1: instant local cache render (zero wait, if we have it)
+      const cached = getCache(key);
+      if (cached && alive) {
+        setSummary(cached.summary);
+        setConclusion(cached.conclusion);
+        setStatus("ready");
+      } else if (alive) {
+        setStatus("loading");
       }
 
-      // STEP 2: resolve who the user is
+      // STEP 2: resolve who the user is (runs in parallel, doesn't block text)
       const { name, isGuest: guestFlag } = await resolveDisplayName();
       if (!alive) return;
+      setGreetingName(name);
       setIsGuest(guestFlag);
 
-      // STEP 3: fetch Supabase briefing
-      const res = await generateBriefing();
+      // STEP 3: ask backend (Supabase decides: serve cached or generate)
+      const res = await generateBriefing({ country, category, mode, headlines });
       if (!alive) return;
 
-      console.log("RAW_BRIEFING_RESULT:", res);
-
-      const summary = res?.summary;
-
-      if (typeof summary === "string" && summary.trim().length > 0) {
-        const finalText = buildBriefingText(name, summary);
-        setCache(finalText);
-        setText(finalText);
-        return;
+      if (typeof res?.summary === "string" && res.summary.trim().length > 0) {
+        setSummary(res.summary);
+        setConclusion(res.conclusion || "");
+        setCache(key, res.summary, res.conclusion || "");
+        setStatus("ready");
+      } else if (!cached) {
+        // Only show "empty" if we never had anything to show at all
+        setStatus("empty");
       }
-
-      // TEMP DEBUG: show the actual error/response on screen
-      // (Remove this block once we identify the issue)
-      const debugInfo = `DEBUG → error: ${res?.error ?? "none"} | summary: "${
-        res?.summary
-      }" | raw: ${JSON.stringify(res)}`;
-      setText(debugInfo);
     }
 
     load();
@@ -139,7 +160,8 @@ export function AISummaryCard() {
     return () => {
       alive = false;
     };
-  }, []);
+    // Re-run whenever the selected combo changes
+  }, [country, category, mode, headlines.join("|")]);
 
   return (
     <div className="rounded-xl border border-white/10 bg-black/60 p-4 text-white">
@@ -147,9 +169,35 @@ export function AISummaryCard() {
         AI Briefing
       </div>
 
-      <p className="mt-2 text-sm leading-relaxed whitespace-pre-wrap">
-        {text}
+      <p className="mt-2 text-sm leading-relaxed">
+        {getGreeting()} {greetingName},
       </p>
+
+      {status === "loading" && (
+        <p className="mt-2 text-sm leading-relaxed opacity-70">
+          Preparing your briefing...
+        </p>
+      )}
+
+      {status === "empty" && (
+        <p className="mt-2 text-sm leading-relaxed opacity-70">
+          No briefing available for this selection yet.
+        </p>
+      )}
+
+      {status === "ready" && (
+        <>
+          <p className="mt-2 text-sm leading-relaxed whitespace-pre-wrap">
+            {summary}
+          </p>
+
+          {conclusion && (
+            <p className="mt-3 text-sm leading-relaxed italic opacity-80 border-t border-white/10 pt-2">
+              {conclusion}
+            </p>
+          )}
+        </>
+      )}
 
       {isGuest && (
         <button
