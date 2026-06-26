@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Sparkles } from "lucide-react";
 import { generateBriefing } from "@/lib/news.functions";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -163,33 +164,34 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
   }, [country, category, mode, headlines.join("|")]);
 
   return (
-    <div className="rounded-xl border border-white/10 bg-black/60 p-4 text-white">
-      <div className="text-[10px] uppercase tracking-widest opacity-60">
+    <div className="rounded-xl border border-primary/40 bg-surface-1 p-4 text-foreground glow-primary">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-primary">
+        <Sparkles className="h-3 w-3" />
         AI Briefing
       </div>
 
-      <p className="mt-2 text-sm leading-relaxed">
+      <p className="mt-2 text-sm leading-relaxed text-foreground">
         {getGreeting()} {greetingName},
       </p>
 
       {status === "loading" && (
-        <p className="mt-2 text-sm leading-relaxed opacity-70">
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
           Preparing your briefing...
         </p>
       )}
 
       {status === "empty" && (
-        <p className="mt-2 text-sm leading-relaxed opacity-70">
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
           No briefing available for this selection yet.
         </p>
       )}
 
       {status === "ready" && (
         <div className="mt-2 space-y-3">
-          <p className="text-sm leading-relaxed">{summary}</p>
+          <p className="text-sm leading-relaxed text-foreground">{summary}</p>
 
           {conclusion && (
-            <p className="text-sm leading-relaxed italic opacity-80 border-t border-white/10 pt-3">
+            <p className="text-sm leading-relaxed text-foreground">
               {conclusion}
             </p>
           )}
@@ -202,7 +204,7 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
           onClick={() => {
             window.location.href = "/login";
           }}
-          className="mt-3 text-xs underline opacity-70 hover:opacity-100"
+          className="mt-3 text-xs underline text-muted-foreground hover:text-foreground"
         >
           Sign in for a personalized briefing
         </button>
