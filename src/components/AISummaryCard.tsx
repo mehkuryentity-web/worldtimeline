@@ -117,7 +117,6 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
   const [status, setStatus] = useState<"loading" | "ready" | "empty">(
     "loading"
   );
-  const [debugInfo, setDebugInfo] = useState<string>("");
 
   useEffect(() => {
     let alive = true;
@@ -153,11 +152,6 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
       } else if (!cached) {
         setStatus("empty");
       }
-
-      // TEMP DEBUG — remove once diagnosed
-      setDebugInfo(
-        `[DEBUG] sent → country=${country} category=${category} mode=${mode} headlines=${headlines.length} | received → cached=${res?.cached} error=${res?.error ?? "none"} summaryLen=${res?.summary?.length ?? 0} stale=${(res as any)?.stale ?? "n/a"}`
-      );
     }
 
     load();
@@ -191,24 +185,15 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
       )}
 
       {status === "ready" && (
-        <>
-          <p className="mt-2 text-sm leading-relaxed whitespace-pre-wrap">
-            {summary}
-          </p>
+        <div className="mt-2 space-y-3">
+          <p className="text-sm leading-relaxed">{summary}</p>
 
           {conclusion && (
-            <p className="mt-3 text-sm leading-relaxed italic opacity-80 border-t border-white/10 pt-2">
+            <p className="text-sm leading-relaxed italic opacity-80 border-t border-white/10 pt-3">
               {conclusion}
             </p>
           )}
-        </>
-      )}
-
-      {/* TEMP DEBUG BLOCK — remove once diagnosed */}
-      {debugInfo && (
-        <p className="mt-3 text-[10px] leading-relaxed text-yellow-400 border-t border-yellow-400/30 pt-2 whitespace-pre-wrap">
-          {debugInfo}
-        </p>
+        </div>
       )}
 
       {isGuest && (
