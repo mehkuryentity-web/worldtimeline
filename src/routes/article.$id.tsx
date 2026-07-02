@@ -50,12 +50,12 @@ export function ArticlePage() {
           id: item.id,
           title: item.title,
           content: item.summary,
+          url: item.url,
         },
       });
 
       const out = data?.lines;
 
-      // 🔒 ONLY ACCEPT CLEAN ARRAY STRINGS
       if (Array.isArray(out) && out.every((l) => typeof l === "string")) {
         setLines(out);
         save(item.id, out);
@@ -81,7 +81,7 @@ export function ArticlePage() {
         {loading && !lines.length ? (
           <div className="flex gap-2 text-xs">
             <Loader2 className="h-3 w-3 animate-spin" />
-            Loading summary...
+            Synthesising takeaways...
           </div>
         ) : lines.length ? (
           <div className="space-y-2 text-sm leading-relaxed">
