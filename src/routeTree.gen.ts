@@ -13,6 +13,7 @@ import { Route as TrendingRouteImport } from './routes/trending'
 import { Route as SubmitRouteImport } from './routes/submit'
 import { Route as SavedRouteImport } from './routes/saved'
 import { Route as ProfileRouteImport } from './routes/profile'
+import { Route as JobsRouteImport } from './routes/jobs'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ArticleIdRouteImport } from './routes/article.$id'
@@ -37,6 +38,11 @@ const SavedRoute = SavedRouteImport.update({
 const ProfileRoute = ProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const JobsRoute = JobsRouteImport.update({
+  id: '/jobs',
+  path: '/jobs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthRoute = AuthRouteImport.update({
@@ -68,6 +74,7 @@ const ApiGeoRoute = ApiGeoRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/jobs': typeof JobsRoute
   '/profile': typeof ProfileRoute
   '/saved': typeof SavedRoute
   '/submit': typeof SubmitRoute
@@ -79,6 +86,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/jobs': typeof JobsRoute
   '/profile': typeof ProfileRoute
   '/saved': typeof SavedRoute
   '/submit': typeof SubmitRoute
@@ -91,6 +99,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/jobs': typeof JobsRoute
   '/profile': typeof ProfileRoute
   '/saved': typeof SavedRoute
   '/submit': typeof SubmitRoute
@@ -104,6 +113,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/jobs'
     | '/profile'
     | '/saved'
     | '/submit'
@@ -115,6 +125,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/auth'
+    | '/jobs'
     | '/profile'
     | '/saved'
     | '/submit'
@@ -126,6 +137,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/auth'
+    | '/jobs'
     | '/profile'
     | '/saved'
     | '/submit'
@@ -138,6 +150,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthRoute: typeof AuthRoute
+  JobsRoute: typeof JobsRoute
   ProfileRoute: typeof ProfileRoute
   SavedRoute: typeof SavedRoute
   SubmitRoute: typeof SubmitRoute
@@ -175,6 +188,13 @@ declare module '@tanstack/react-router' {
       path: '/profile'
       fullPath: '/profile'
       preLoaderRoute: typeof ProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/jobs': {
+      id: '/jobs'
+      path: '/jobs'
+      fullPath: '/jobs'
+      preLoaderRoute: typeof JobsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth': {
@@ -218,6 +238,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthRoute: AuthRoute,
+  JobsRoute: JobsRoute,
   ProfileRoute: ProfileRoute,
   SavedRoute: SavedRoute,
   SubmitRoute: SubmitRoute,
