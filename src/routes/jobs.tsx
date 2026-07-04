@@ -26,7 +26,7 @@ export const Route = createFileRoute("/jobs")({
   component: JobsPage,
 });
 
-const JOB_TYPES: JobType[] = ["Full-time", "Part-time", "Contract", "Remote"];
+const JOB_TYPES: JobType[] = ["Full-time", "Part-time", "Contract", "Remote", "On-site"];
 
 function JobsPage() {
   const [tab, setTab] = useState<"browse" | "post">("browse");
@@ -124,7 +124,7 @@ function JobsPage() {
           </div>
           <h1 className="mt-2 text-lg font-semibold tracking-tight">Find or post work</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Live listings plus community postings. No points involved.
+            Live listings plus community postings.
           </p>
           <div className="mt-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
             <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
