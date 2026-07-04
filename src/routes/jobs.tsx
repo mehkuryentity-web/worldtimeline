@@ -32,6 +32,7 @@ export const Route = createFileRoute("/jobs")({
 });
 
 const JOB_TYPES: JobType[] = ["Full-time", "Part-time", "Contract", "Remote", "On-site"];
+const PAGE_SIZE = 20;
 
 type Recency = "all" | "24h" | "7d" | "30d";
 
@@ -56,6 +57,7 @@ function JobsPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [engagementMap, setEngagementMap] = useState<Record<string, EngagementCounts>>({});
   const [myReactions, setMyReactions] = useState<Set<string>>(new Set());
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   // Post form state
   const [title, setTitle] = useState("");
@@ -76,16 +78,14 @@ function JobsPage() {
     setLoading(false);
 
     const ids = result.jobs.map((j) => j.id);
-    const [uid, counts] = await Promise.all([
-      getCurrentUserId(),
+    const uid = await getCurrentUserId(); // local session read, no network round-trip
+    const [counts, mine] = await Promise.all([
       getEngagementCounts(ids),
+      uid ? getMyReactions(ids, uid) : Promise.resolve(new Set<string>()),
     ]);
     setUserId(uid);
     setEngagementMap(counts);
-    if (uid) {
-      const mine = await getMyReactions(ids, uid);
-      setMyReactions(mine);
-    }
+    setMyReactions(mine);
   };
 
   useEffect(() => {
@@ -162,6 +162,12 @@ function JobsPage() {
       );
     });
   }, [jobs, query, typeFilter, locationQuery, recency]);
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [query, typeFilter, locationQuery, recency]);
+
+  const visibleJobs = filtered.slice(0, visibleCount);
 
   const canSubmit =
     title.trim().length >= 3 &&
@@ -335,7 +341,7 @@ function JobsPage() {
               </div>
             ) : (
               <div className="space-y-2">
-                {filtered.map((j) => (
+                {visibleJobs.map((j) => (
                   <JobCard
                     key={j.id}
                     job={j}
@@ -348,6 +354,14 @@ function JobsPage() {
                     onToggleSave={handleToggleSave}
                   />
                 ))}
+                {visibleCount < filtered.length && (
+                  <button
+                    onClick={() => setVisibleCount((v) => v + PAGE_SIZE)}
+                    className="w-full rounded-md border border-border bg-surface-1 py-2.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                  >
+                    Load more ({filtered.length - visibleCount} remaining)
+                  </button>
+                )}
               </div>
             )}
           </div>
