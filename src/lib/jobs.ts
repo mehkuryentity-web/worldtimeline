@@ -12,6 +12,7 @@ export interface JobListing {
   postedAt: string;
   source: JobSource;
   tags?: string[];
+  logoUrl?: string | null;
 }
 
 const STORAGE_KEY = "worldtimeline_jobs";
@@ -66,6 +67,7 @@ function normalizeCachedJob(job: any): JobListing {
     postedAt: job.created_at || new Date().toISOString(),
     source: "external",
     tags: Array.isArray(job.tags) ? job.tags : [],
+    logoUrl: job.logo_url || null,
   };
 }
 
