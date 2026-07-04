@@ -4,17 +4,22 @@ import {
   Briefcase,
   Search,
   MapPin,
-  Building2,
-  ExternalLink,
   Check,
   Send,
   RefreshCw,
-  Users,
 } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
+import { JobCard } from "@/components/JobCard";
+import { useAppState } from "@/hooks/use-app-state";
 import { getJobs, postJob, timeAgo } from "@/lib/jobs";
 import type { JobListing, JobType } from "@/lib/jobs";
+import {
+  getCurrentUserId,
+  getEngagementCounts,
+  getMyReactions,
+} from "@/lib/job-engagement";
+import type { EngagementCounts } from "@/lib/job-engagement";
 
 export const Route = createFileRoute("/jobs")({
   head: () => ({
@@ -38,6 +43,7 @@ const RECENCY_OPTIONS: { value: Recency; label: string }[] = [
 ];
 
 function JobsPage() {
+  const { update: updateAppState, state: appState } = useAppState();
   const [tab, setTab] = useState<"browse" | "post">("browse");
   const [jobs, setJobs] = useState<JobListing[]>([]);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
@@ -47,6 +53,9 @@ function JobsPage() {
   const [typeFilter, setTypeFilter] = useState<JobType | "All">("All");
   const [locationQuery, setLocationQuery] = useState("");
   const [recency, setRecency] = useState<Recency>("all");
+  const [userId, setUserId] = useState<string | null>(null);
+  const [engagementMap, setEngagementMap] = useState<Record<string, EngagementCounts>>({});
+  const [myReactions, setMyReactions] = useState<Set<string>>(new Set());
 
   // Post form state
   const [title, setTitle] = useState("");
@@ -65,11 +74,64 @@ function JobsPage() {
     setLastSyncedAt(result.lastSyncedAt);
     setStale(result.stale);
     setLoading(false);
+
+    const ids = result.jobs.map((j) => j.id);
+    const [uid, counts] = await Promise.all([
+      getCurrentUserId(),
+      getEngagementCounts(ids),
+    ]);
+    setUserId(uid);
+    setEngagementMap(counts);
+    if (uid) {
+      const mine = await getMyReactions(ids, uid);
+      setMyReactions(mine);
+    }
   };
 
   useEffect(() => {
     loadJobs();
   }, []);
+
+  const handleCountsChange = (
+    jobId: string,
+    updater: (c: EngagementCounts) => EngagementCounts
+  ) => {
+    setEngagementMap((prev) => ({
+      ...prev,
+      [jobId]: updater(prev[jobId] ?? { interestedCount: 0, viewCount: 0, commentCount: 0 }),
+    }));
+  };
+
+  const handleInterestedChange = (jobId: string, interested: boolean) => {
+    setMyReactions((prev) => {
+      const next = new Set(prev);
+      if (interested) next.add(jobId);
+      else next.delete(jobId);
+      return next;
+    });
+  };
+
+  const handleToggleSave = (job: JobListing) => {
+    updateAppState((s) => {
+      const next = { ...(s.saved ?? {}) };
+      if (next[job.id]) {
+        delete next[job.id];
+      } else {
+        next[job.id] = {
+          id: job.id,
+          title: job.title,
+          summary: job.description,
+          url: job.applyUrl,
+          source: job.company,
+          region: job.location,
+          category: "Jobs",
+          publishedAt: job.postedAt,
+          savedAt: new Date().toISOString(),
+        };
+      }
+      return { ...s, saved: next };
+    });
+  };
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -274,64 +336,17 @@ function JobsPage() {
             ) : (
               <div className="space-y-2">
                 {filtered.map((j) => (
-                  <article
+                  <JobCard
                     key={j.id}
-                    className="rounded-md border border-border bg-surface-1 p-3"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-start gap-2">
-                        {j.logoUrl ? (
-                          <img
-                            src={j.logoUrl}
-                            alt=""
-                            className="h-8 w-8 shrink-0 rounded-md border border-border object-cover"
-                            onError={(e) => {
-                              (e.currentTarget as HTMLImageElement).style.display = "none";
-                            }}
-                          />
-                        ) : (
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface-2">
-                            <Building2 className="h-4 w-4 text-muted-foreground" />
-                          </div>
-                        )}
-                        <div>
-                          <h3 className="text-sm font-semibold">{j.title}</h3>
-                          <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                            {j.company}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex shrink-0 flex-col items-end gap-1">
-                        <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-                          {j.type}
-                        </span>
-                        {j.source === "community" && (
-                          <span className="flex items-center gap-1 rounded-full bg-accent/20 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-accent">
-                            <Users className="h-2.5 w-2.5" /> Community
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
-                      <MapPin className="h-3 w-3" /> {j.location}
-                      <span className="ml-auto font-mono text-[10px]">
-                        {timeAgo(j.postedAt)}
-                      </span>
-                    </div>
-                    {j.description && (
-                      <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
-                        {j.description}
-                      </p>
-                    )}
-                    <a
-                      href={j.applyUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-3 flex items-center justify-center gap-1.5 rounded-md bg-primary py-2 font-mono text-[11px] uppercase tracking-wider text-primary-foreground"
-                    >
-                      Apply <ExternalLink className="h-3 w-3" />
-                    </a>
-                  </article>
+                    job={j}
+                    userId={userId}
+                    counts={engagementMap[j.id]}
+                    interested={myReactions.has(j.id)}
+                    isSaved={!!appState.saved?.[j.id]}
+                    onCountsChange={handleCountsChange}
+                    onInterestedChange={handleInterestedChange}
+                    onToggleSave={handleToggleSave}
+                  />
                 ))}
               </div>
             )}
