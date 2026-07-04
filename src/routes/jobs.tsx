@@ -28,6 +28,15 @@ export const Route = createFileRoute("/jobs")({
 
 const JOB_TYPES: JobType[] = ["Full-time", "Part-time", "Contract", "Remote", "On-site"];
 
+type Recency = "all" | "24h" | "7d" | "30d";
+
+const RECENCY_OPTIONS: { value: Recency; label: string }[] = [
+  { value: "all", label: "Any time" },
+  { value: "24h", label: "Past 24h" },
+  { value: "7d", label: "Past week" },
+  { value: "30d", label: "Past month" },
+];
+
 function JobsPage() {
   const [tab, setTab] = useState<"browse" | "post">("browse");
   const [jobs, setJobs] = useState<JobListing[]>([]);
@@ -36,6 +45,8 @@ function JobsPage() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<JobType | "All">("All");
+  const [locationQuery, setLocationQuery] = useState("");
+  const [recency, setRecency] = useState<Recency>("all");
 
   // Post form state
   const [title, setTitle] = useState("");
@@ -62,9 +73,25 @@ function JobsPage() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const loc = locationQuery.trim().toLowerCase();
+    const recencyMs: Record<Exclude<Recency, "all">, number> = {
+      "24h": 24 * 60 * 60 * 1000,
+      "7d": 7 * 24 * 60 * 60 * 1000,
+      "30d": 30 * 24 * 60 * 60 * 1000,
+    };
+    const now = Date.now();
+
     return jobs.filter((j) => {
       const matchesType = typeFilter === "All" || j.type === typeFilter;
       if (!matchesType) return false;
+
+      if (loc && !j.location.toLowerCase().includes(loc)) return false;
+
+      if (recency !== "all") {
+        const age = now - new Date(j.postedAt).getTime();
+        if (age > recencyMs[recency]) return false;
+      }
+
       if (!q) return true;
       return (
         j.title.toLowerCase().includes(q) ||
@@ -72,7 +99,7 @@ function JobsPage() {
         j.location.toLowerCase().includes(q)
       );
     });
-  }, [jobs, query, typeFilter]);
+  }, [jobs, query, typeFilter, locationQuery, recency]);
 
   const canSubmit =
     title.trim().length >= 3 &&
@@ -172,6 +199,16 @@ function JobsPage() {
               />
             </div>
 
+            <div className="relative">
+              <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={locationQuery}
+                onChange={(e) => setLocationQuery(e.target.value)}
+                placeholder="Filter by location (e.g. Berlin, Remote)"
+                className="w-full rounded-md border border-border bg-surface-1 py-2.5 pl-9 pr-3 text-sm focus:border-primary focus:outline-none"
+              />
+            </div>
+
             <div className="flex flex-wrap gap-1.5">
               <button
                 onClick={() => setTypeFilter("All")}
@@ -194,6 +231,22 @@ function JobsPage() {
                   }`}
                 >
                   {t}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap gap-1.5">
+              {RECENCY_OPTIONS.map((r) => (
+                <button
+                  key={r.value}
+                  onClick={() => setRecency(r.value)}
+                  className={`rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition ${
+                    recency === r.value
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border text-muted-foreground"
+                  }`}
+                >
+                  {r.label}
                 </button>
               ))}
             </div>
@@ -226,10 +279,26 @@ function JobsPage() {
                     className="rounded-md border border-border bg-surface-1 p-3"
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <h3 className="text-sm font-semibold">{j.title}</h3>
-                        <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                          <Building2 className="h-3 w-3" /> {j.company}
+                      <div className="flex items-start gap-2">
+                        {j.logoUrl ? (
+                          <img
+                            src={j.logoUrl}
+                            alt=""
+                            className="h-8 w-8 shrink-0 rounded-md border border-border object-cover"
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).style.display = "none";
+                            }}
+                          />
+                        ) : (
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface-2">
+                            <Building2 className="h-4 w-4 text-muted-foreground" />
+                          </div>
+                        )}
+                        <div>
+                          <h3 className="text-sm font-semibold">{j.title}</h3>
+                          <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                            {j.company}
+                          </div>
                         </div>
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-1">
