@@ -1,5 +1,5 @@
-export type JobType = "Full-time" | "Part-time" | "Contract" | "Remote";
-export type JobSource = "community" | "arbeitnow";
+export type JobType = "Full-time" | "Part-time" | "Contract" | "Remote" | "On-site";
+export type JobSource = "community" | "external";
 
 export interface JobListing {
   id: string;
@@ -47,13 +47,14 @@ function mapJobType(job: any): JobType {
   const types: string[] = Array.isArray(job.job_types) ? job.job_types : [];
   if (types.some((t) => /part/i.test(t))) return "Part-time";
   if (types.some((t) => /contract|freelance/i.test(t))) return "Contract";
-  return "Full-time";
+  if (types.some((t) => /full/i.test(t))) return "Full-time";
+  return "On-site";
 }
 
 // deno-lint-ignore no-explicit-any
-function normalizeArbeitnowJob(job: any): JobListing {
+function normalizeCachedJob(job: any): JobListing {
   return {
-    id: `an_${job.id}`,
+    id: `ext_${job.id}`,
     title: job.title || "Untitled role",
     company: job.company || "Unknown company",
     location: job.location || (job.remote ? "Remote" : "Not specified"),
@@ -63,7 +64,7 @@ function normalizeArbeitnowJob(job: any): JobListing {
       ? String(job.description).replace(/<[^>]+>/g, "").slice(0, 600)
       : "",
     postedAt: job.created_at || new Date().toISOString(),
-    source: "arbeitnow",
+    source: "external",
     tags: Array.isArray(job.tags) ? job.tags : [],
   };
 }
@@ -77,9 +78,10 @@ export interface JobsFetchResult {
 /**
  * ---- DATA SOURCE SEAM ----
  * Community jobs live in localStorage until you're ready to move posting
- * server-side too. Arbeitnow jobs come from the Supabase-cached edge
- * function (never calls the external API directly from the client).
- * Both are merged here so jobs.tsx doesn't need to know the difference.
+ * server-side too. External jobs (Arbeitnow, RemoteJobs.org, and any future
+ * source) come from the Supabase-cached get-jobs edge function, which
+ * already merges every cached provider server-side. Both are merged here
+ * so jobs.tsx doesn't need to know the difference.
  */
 export async function getJobs(): Promise<JobsFetchResult> {
   const community = readLocal();
@@ -91,7 +93,7 @@ export async function getJobs(): Promise<JobsFetchResult> {
     const res = await fetch(GET_JOBS_URL, { method: "POST" });
     if (res.ok) {
       const json = await res.json();
-      external = Array.isArray(json?.jobs) ? json.jobs.map(normalizeArbeitnowJob) : [];
+      external = Array.isArray(json?.jobs) ? json.jobs.map(normalizeCachedJob) : [];
       lastSyncedAt = json?.last_synced_at ?? null;
       stale = !!json?.stale;
     } else {
