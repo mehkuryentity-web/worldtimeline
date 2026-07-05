@@ -13,6 +13,7 @@ import {
   Send,
   CornerDownRight,
   Users,
+  Sparkles,
 } from "lucide-react";
 import type { JobListing } from "@/lib/jobs";
 import { timeAgo } from "@/lib/jobs";
@@ -24,6 +25,7 @@ import {
   reportJob,
   toggleInterested,
 } from "@/lib/job-engagement";
+import type { JobMatch } from "@/lib/job-matches";
 
 interface JobCardProps {
   job: JobListing;
@@ -31,6 +33,7 @@ interface JobCardProps {
   counts: EngagementCounts;
   interested: boolean;
   isSaved: boolean;
+  match?: JobMatch | null;
   onCountsChange: (jobId: string, updater: (c: EngagementCounts) => EngagementCounts) => void;
   onInterestedChange: (jobId: string, interested: boolean) => void;
   onToggleSave: (job: JobListing) => void;
@@ -44,6 +47,7 @@ export function JobCard({
   counts,
   interested,
   isSaved,
+  match,
   onCountsChange,
   onInterestedChange,
   onToggleSave,
@@ -180,6 +184,25 @@ export function JobCard({
           )}
         </div>
       </div>
+
+      {match && (
+        <div
+          className={`mt-2 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs ${
+            match.score === "strong"
+              ? "bg-accent/10 text-accent"
+              : "bg-surface-2 text-muted-foreground"
+          }`}
+        >
+          <Sparkles className="h-3.5 w-3.5 shrink-0" />
+          <span>
+            <strong>{match.score === "strong" ? "Strong match" : "Possible match"}</strong> ·
+            matches your interest in {match.matchedInterest}
+            {match.matchedKeyword.toLowerCase() !== match.matchedInterest.toLowerCase() && (
+              <> (via "{match.matchedKeyword}")</>
+            )}
+          </span>
+        </div>
+      )}
 
       <div className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
         <MapPin className="h-3 w-3" /> {job.location}
