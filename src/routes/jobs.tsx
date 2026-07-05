@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   Briefcase,
@@ -7,10 +7,15 @@ import {
   Check,
   Send,
   RefreshCw,
+  Target,
+  Sparkles,
+  Bell,
 } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
 import { JobCard } from "@/components/JobCard";
+import { InterestsPicker } from "@/components/InterestsPicker";
+import { NotificationsPanel } from "@/components/NotificationsPanel";
 import { useAppState } from "@/hooks/use-app-state";
 import { getJobs, postJob, timeAgo } from "@/lib/jobs";
 import type { JobListing, JobType } from "@/lib/jobs";
@@ -20,6 +25,14 @@ import {
   getMyReactions,
 } from "@/lib/job-engagement";
 import type { EngagementCounts } from "@/lib/job-engagement";
+import {
+  getMyInterests,
+  computeMatches,
+  syncMatches,
+  getUnseenMatchCount,
+  markMatchesSeen,
+} from "@/lib/job-matches";
+import type { JobMatch } from "@/lib/job-matches";
 
 export const Route = createFileRoute("/jobs")({
   head: () => ({
@@ -44,6 +57,7 @@ const RECENCY_OPTIONS: { value: Recency; label: string }[] = [
 ];
 
 function JobsPage() {
+  const navigate = useNavigate();
   const { update: updateAppState, state: appState } = useAppState();
   const [tab, setTab] = useState<"browse" | "post">("browse");
   const [jobs, setJobs] = useState<JobListing[]>([]);
@@ -58,6 +72,12 @@ function JobsPage() {
   const [engagementMap, setEngagementMap] = useState<Record<string, EngagementCounts>>({});
   const [myReactions, setMyReactions] = useState<Set<string>>(new Set());
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [interests, setInterests] = useState<string[]>([]);
+  const [matchInfo, setMatchInfo] = useState<Map<string, JobMatch>>(new Map());
+  const [unseenMatchCount, setUnseenMatchCount] = useState(0);
+  const [showInterestsPicker, setShowInterestsPicker] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [forYouOnly, setForYouOnly] = useState(false);
 
   // Post form state
   const [title, setTitle] = useState("");
@@ -79,18 +99,40 @@ function JobsPage() {
 
     const ids = result.jobs.map((j) => j.id);
     const uid = await getCurrentUserId(); // local session read, no network round-trip
-    const [counts, mine] = await Promise.all([
+    const [counts, mine, myInterests] = await Promise.all([
       getEngagementCounts(ids),
       uid ? getMyReactions(ids, uid) : Promise.resolve(new Set<string>()),
+      uid ? getMyInterests(uid) : Promise.resolve([]),
     ]);
     setUserId(uid);
     setEngagementMap(counts);
     setMyReactions(mine);
+    setInterests(myInterests);
   };
 
   useEffect(() => {
     loadJobs();
   }, []);
+
+  useEffect(() => {
+    if (!userId || interests.length === 0 || jobs.length === 0) {
+      setMatchInfo(new Map());
+      return;
+    }
+    const matches = computeMatches(jobs, interests);
+    setMatchInfo(new Map(matches.map((m) => [m.job.id, m])));
+    syncMatches(userId, matches).then(() => {
+      getUnseenMatchCount(userId).then(setUnseenMatchCount);
+    });
+  }, [jobs, interests, userId]);
+
+  const viewMatches = () => {
+    setShowNotifications(true);
+  };
+
+  const handleInterestsSaved = (next: string[]) => {
+    setInterests(next);
+  };
 
   const handleCountsChange = (
     jobId: string,
@@ -144,6 +186,8 @@ function JobsPage() {
     const now = Date.now();
 
     return jobs.filter((j) => {
+      if (forYouOnly && !matchInfo.has(j.id)) return false;
+
       const matchesType = typeFilter === "All" || j.type === typeFilter;
       if (!matchesType) return false;
 
@@ -161,11 +205,11 @@ function JobsPage() {
         j.location.toLowerCase().includes(q)
       );
     });
-  }, [jobs, query, typeFilter, locationQuery, recency]);
+  }, [jobs, query, typeFilter, locationQuery, recency, forYouOnly, matchInfo]);
 
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [query, typeFilter, locationQuery, recency]);
+  }, [query, typeFilter, locationQuery, recency, forYouOnly]);
 
   const visibleJobs = filtered.slice(0, visibleCount);
 
@@ -209,13 +253,40 @@ function JobsPage() {
       <TopBar />
       <main className="mx-auto max-w-md space-y-4 px-4 pt-4">
         <section className="rounded-xl border border-border bg-surface-1 p-4">
-          <div className="flex items-center gap-2">
-            <span className="rounded-sm bg-primary px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-primary-foreground">
-              <Briefcase className="inline h-3 w-3" />
-            </span>
-            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-              Jobs board
-            </span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="rounded-sm bg-primary px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-primary-foreground">
+                <Briefcase className="inline h-3 w-3" />
+              </span>
+              <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                Jobs board
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => {
+                  if (!userId) return navigate({ to: "/auth" });
+                  setShowNotifications(true);
+                }}
+                className="relative flex items-center gap-1 rounded-full border border-border px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-primary"
+              >
+                <Bell className="h-3 w-3" />
+                {unseenMatchCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-0.5 font-mono text-[8px] text-white">
+                    {unseenMatchCount > 9 ? "9+" : unseenMatchCount}
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={() => {
+                  if (!userId) return navigate({ to: "/auth" });
+                  setShowInterestsPicker(true);
+                }}
+                className="flex items-center gap-1 rounded-full border border-border px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-primary"
+              >
+                <Target className="h-3 w-3" /> Interests
+              </button>
+            </div>
           </div>
           <h1 className="mt-2 text-lg font-semibold tracking-tight">Find or post work</h1>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -231,6 +302,36 @@ function JobsPage() {
             {stale && <span className="text-destructive">· showing last known data</span>}
           </div>
         </section>
+
+        {showInterestsPicker && userId && (
+          <InterestsPicker
+            userId={userId}
+            initialInterests={interests}
+            onClose={() => setShowInterestsPicker(false)}
+            onSaved={handleInterestsSaved}
+          />
+        )}
+
+        {showNotifications && userId && (
+          <NotificationsPanel
+            userId={userId}
+            onClose={() => setShowNotifications(false)}
+            onAllSeen={() => setUnseenMatchCount(0)}
+          />
+        )}
+
+        {unseenMatchCount > 0 && (
+          <button
+            onClick={viewMatches}
+            className="flex w-full items-center gap-2 rounded-xl border border-primary bg-primary/10 p-3 text-left"
+          >
+            <Bell className="h-4 w-4 shrink-0 text-primary" />
+            <span className="text-sm">
+              <strong>{unseenMatchCount}</strong> new job{unseenMatchCount === 1 ? "" : "s"}{" "}
+              match your interests
+            </span>
+          </button>
+        )}
 
         <div className="flex rounded-md border border-border bg-surface-1 p-1">
           <button
@@ -257,6 +358,20 @@ function JobsPage() {
 
         {tab === "browse" ? (
           <div className="space-y-3">
+            {interests.length > 0 && (
+              <button
+                onClick={() => setForYouOnly((v) => !v)}
+                className={`flex w-full items-center justify-center gap-1.5 rounded-md border py-2 font-mono text-[11px] uppercase tracking-wider transition ${
+                  forYouOnly
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border text-muted-foreground"
+                }`}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                {forYouOnly ? "Showing matches for you" : `For You (${matchInfo.size})`}
+              </button>
+            )}
+
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
@@ -349,6 +464,7 @@ function JobsPage() {
                     counts={engagementMap[j.id]}
                     interested={myReactions.has(j.id)}
                     isSaved={!!appState.saved?.[j.id]}
+                    match={matchInfo.get(j.id) ?? null}
                     onCountsChange={handleCountsChange}
                     onInterestedChange={handleInterestedChange}
                     onToggleSave={handleToggleSave}
