@@ -10,7 +10,7 @@ const ONE_HOUR_MS = 60 * 60 * 1000;
 // Simulated-stream tuning: reveal this many words per tick.
 // Backend still returns the full payload in one shot — this is
 // purely a frontend render effect, no edge function changes.
-const STREAM_MS_PER_WORD = 35;
+const STREAM_MS_PER_WORD = 90;
 const STREAM_WORDS_PER_TICK = 1;
 
 interface CachedBriefing {
