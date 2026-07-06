@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronUp,
   SlidersHorizontal,
+  AlertTriangle,
 } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
@@ -18,7 +19,7 @@ import { JobCard } from "@/components/JobCard";
 import { InterestsPicker } from "@/components/InterestsPicker";
 import { useAppState } from "@/hooks/use-app-state";
 import { getJobs, postJob, timeAgo } from "@/lib/jobs";
-import type { JobListing, JobType } from "@/lib/jobs";
+import type { JobListing, JobType, SourceStatus } from "@/lib/jobs";
 import {
   getCurrentUserId,
   getEngagementCounts,
@@ -64,6 +65,8 @@ function JobsPage() {
   const [tab, setTab] = useState<Tab>("browse");
   const [jobs, setJobs] = useState<JobListing[]>([]);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [sources, setSources] = useState<SourceStatus[]>([]);
+  const [showSourceDetail, setShowSourceDetail] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const [query, setQuery] = useState("");
@@ -98,6 +101,7 @@ function JobsPage() {
     const result = await getJobs();
     setJobs(result.jobs);
     setLastSyncedAt(result.lastSyncedAt);
+    setSources(result.sources);
     setLoading(false);
 
     const ids = result.jobs.map((j) => j.id);
@@ -384,13 +388,40 @@ function JobsPage() {
                 </div>
               )}
 
-              <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
-                {lastSyncedAt
-                  ? `Feed updated ${timeAgo(lastSyncedAt)} · refreshes hourly · ${filtered.length} shown`
-                  : loading
-                    ? "Syncing listings..."
-                    : `${filtered.length} shown`}
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
+                  {lastSyncedAt
+                    ? `Feed updated ${timeAgo(lastSyncedAt)} · refreshes hourly · ${filtered.length} shown`
+                    : loading
+                      ? "Syncing listings..."
+                      : `${filtered.length} shown`}
+                  {sources.filter((s) => s.error).length > 0 && (
+                    <button
+                      onClick={() => setShowSourceDetail((v) => !v)}
+                      className="ml-1 flex items-center gap-1 text-destructive"
+                    >
+                      <AlertTriangle className="h-3 w-3" />
+                      {sources.filter((s) => s.error).length} delayed
+                    </button>
+                  )}
+                </div>
+                {showSourceDetail && (
+                  <div className="space-y-1 rounded-md border border-border bg-surface-1 p-2">
+                    {sources.map((s) => (
+                      <div
+                        key={s.source}
+                        className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider"
+                      >
+                        <span className="text-muted-foreground">{s.label}</span>
+                        <span className={s.error ? "text-destructive" : "text-muted-foreground"}>
+                          {s.lastSyncedAt ? timeAgo(s.lastSyncedAt) : "never synced"}
+                          {s.error ? " · failing" : ""}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {loading ? (
