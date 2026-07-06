@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Briefcase,
   Search,
@@ -8,14 +8,14 @@ import {
   Send,
   RefreshCw,
   Target,
-  Sparkles,
-  Bell,
+  ChevronDown,
+  ChevronUp,
+  SlidersHorizontal,
 } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
 import { JobCard } from "@/components/JobCard";
 import { InterestsPicker } from "@/components/InterestsPicker";
-import { NotificationsPanel } from "@/components/NotificationsPanel";
 import { useAppState } from "@/hooks/use-app-state";
 import { getJobs, postJob, timeAgo } from "@/lib/jobs";
 import type { JobListing, JobType } from "@/lib/jobs";
@@ -29,7 +29,6 @@ import {
   getMyInterests,
   computeMatches,
   syncMatches,
-  getUnseenMatchCount,
   markMatchesSeen,
 } from "@/lib/job-matches";
 import type { JobMatch } from "@/lib/job-matches";
@@ -46,6 +45,8 @@ export const Route = createFileRoute("/jobs")({
 
 const JOB_TYPES: JobType[] = ["Full-time", "Part-time", "Contract", "Remote", "On-site"];
 const PAGE_SIZE = 20;
+const TABS = ["browse", "matches", "post"] as const;
+type Tab = (typeof TABS)[number];
 
 type Recency = "all" | "24h" | "7d" | "30d";
 
@@ -59,25 +60,26 @@ const RECENCY_OPTIONS: { value: Recency; label: string }[] = [
 function JobsPage() {
   const navigate = useNavigate();
   const { update: updateAppState, state: appState } = useAppState();
-  const [tab, setTab] = useState<"browse" | "post">("browse");
+
+  const [tab, setTab] = useState<Tab>("browse");
   const [jobs, setJobs] = useState<JobListing[]>([]);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
-  const [stale, setStale] = useState(false);
   const [loading, setLoading] = useState(true);
+
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<JobType | "All">("All");
   const [locationQuery, setLocationQuery] = useState("");
   const [recency, setRecency] = useState<Recency>("all");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
   const [userId, setUserId] = useState<string | null>(null);
   const [engagementMap, setEngagementMap] = useState<Record<string, EngagementCounts>>({});
   const [myReactions, setMyReactions] = useState<Set<string>>(new Set());
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
   const [interests, setInterests] = useState<string[]>([]);
   const [matchInfo, setMatchInfo] = useState<Map<string, JobMatch>>(new Map());
-  const [unseenMatchCount, setUnseenMatchCount] = useState(0);
   const [showInterestsPicker, setShowInterestsPicker] = useState(false);
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [forYouOnly, setForYouOnly] = useState(false);
 
   // Post form state
   const [title, setTitle] = useState("");
@@ -89,12 +91,13 @@ function JobsPage() {
   const [posted, setPosted] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const touchStartX = useRef<number | null>(null);
+
   const loadJobs = async () => {
     setLoading(true);
     const result = await getJobs();
     setJobs(result.jobs);
     setLastSyncedAt(result.lastSyncedAt);
-    setStale(result.stale);
     setLoading(false);
 
     const ids = result.jobs.map((j) => j.id);
@@ -121,17 +124,90 @@ function JobsPage() {
     }
     const matches = computeMatches(jobs, interests);
     setMatchInfo(new Map(matches.map((m) => [m.job.id, m])));
-    syncMatches(userId, matches).then(() => {
-      getUnseenMatchCount(userId).then(setUnseenMatchCount);
-    });
+    syncMatches(userId, matches);
   }, [jobs, interests, userId]);
 
-  const viewMatches = () => {
-    setShowNotifications(true);
-  };
+  // Opening the Matches tab counts as having seen whatever's there.
+  useEffect(() => {
+    if (tab === "matches" && userId) {
+      markMatchesSeen(userId);
+    }
+  }, [tab, userId]);
 
   const handleInterestsSaved = (next: string[]) => {
     setInterests(next);
+  };
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const loc = locationQuery.trim().toLowerCase();
+    const recencyMs: Record<Exclude<Recency, "all">, number> = {
+      "24h": 24 * 60 * 60 * 1000,
+      "7d": 7 * 24 * 60 * 60 * 1000,
+      "30d": 30 * 24 * 60 * 60 * 1000,
+    };
+    const now = Date.now();
+
+    return jobs.filter((j) => {
+      const matchesType = typeFilter === "All" || j.type === typeFilter;
+      if (!matchesType) return false;
+
+      if (loc && !j.location.toLowerCase().includes(loc)) return false;
+
+      if (recency !== "all") {
+        const age = now - new Date(j.postedAt).getTime();
+        if (age > recencyMs[recency]) return false;
+      }
+
+      if (!q) return true;
+      return (
+        j.title.toLowerCase().includes(q) ||
+        j.company.toLowerCase().includes(q) ||
+        j.location.toLowerCase().includes(q)
+      );
+    });
+  }, [jobs, query, typeFilter, locationQuery, recency]);
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [query, typeFilter, locationQuery, recency]);
+
+  const visibleJobs = filtered.slice(0, visibleCount);
+  const matchedJobs = Array.from(matchInfo.values());
+
+  const canSubmit =
+    title.trim().length >= 3 &&
+    company.trim().length >= 2 &&
+    location.trim().length >= 2 &&
+    description.trim().length >= 20 &&
+    /^https?:\/\/.+/.test(applyUrl.trim());
+
+  const submit = async () => {
+    setErr(null);
+    if (!canSubmit) {
+      setErr("Fill in every field. Apply link must start with http:// or https://.");
+      return;
+    }
+    await postJob({
+      title: title.trim(),
+      company: company.trim(),
+      location: location.trim(),
+      type,
+      applyUrl: applyUrl.trim(),
+      description: description.trim(),
+    });
+    setPosted(true);
+    setTitle("");
+    setCompany("");
+    setLocation("");
+    setType("Full-time");
+    setApplyUrl("");
+    setDescription("");
+    await loadJobs();
+    setTimeout(() => {
+      setPosted(false);
+      setTab("browse");
+    }, 900);
   };
 
   const handleCountsChange = (
@@ -175,77 +251,22 @@ function JobsPage() {
     });
   };
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const loc = locationQuery.trim().toLowerCase();
-    const recencyMs: Record<Exclude<Recency, "all">, number> = {
-      "24h": 24 * 60 * 60 * 1000,
-      "7d": 7 * 24 * 60 * 60 * 1000,
-      "30d": 30 * 24 * 60 * 60 * 1000,
-    };
-    const now = Date.now();
+  const goToTab = (index: number) => {
+    const clamped = Math.max(0, Math.min(TABS.length - 1, index));
+    setTab(TABS[clamped]);
+  };
 
-    return jobs.filter((j) => {
-      if (forYouOnly && !matchInfo.has(j.id)) return false;
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+  };
 
-      const matchesType = typeFilter === "All" || j.type === typeFilter;
-      if (!matchesType) return false;
-
-      if (loc && !j.location.toLowerCase().includes(loc)) return false;
-
-      if (recency !== "all") {
-        const age = now - new Date(j.postedAt).getTime();
-        if (age > recencyMs[recency]) return false;
-      }
-
-      if (!q) return true;
-      return (
-        j.title.toLowerCase().includes(q) ||
-        j.company.toLowerCase().includes(q) ||
-        j.location.toLowerCase().includes(q)
-      );
-    });
-  }, [jobs, query, typeFilter, locationQuery, recency, forYouOnly, matchInfo]);
-
-  useEffect(() => {
-    setVisibleCount(PAGE_SIZE);
-  }, [query, typeFilter, locationQuery, recency, forYouOnly]);
-
-  const visibleJobs = filtered.slice(0, visibleCount);
-
-  const canSubmit =
-    title.trim().length >= 3 &&
-    company.trim().length >= 2 &&
-    location.trim().length >= 2 &&
-    description.trim().length >= 20 &&
-    /^https?:\/\/.+/.test(applyUrl.trim());
-
-  const submit = async () => {
-    setErr(null);
-    if (!canSubmit) {
-      setErr("Fill in every field. Apply link must start with http:// or https://.");
-      return;
-    }
-    await postJob({
-      title: title.trim(),
-      company: company.trim(),
-      location: location.trim(),
-      type,
-      applyUrl: applyUrl.trim(),
-      description: description.trim(),
-    });
-    setPosted(true);
-    setTitle("");
-    setCompany("");
-    setLocation("");
-    setType("Full-time");
-    setApplyUrl("");
-    setDescription("");
-    await loadJobs();
-    setTimeout(() => {
-      setPosted(false);
-      setTab("browse");
-    }, 900);
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null) return;
+    const delta = e.changedTouches[0].clientX - touchStartX.current;
+    touchStartX.current = null;
+    const currentIndex = TABS.indexOf(tab);
+    if (delta > 60) goToTab(currentIndex - 1); // swipe right -> previous tab
+    else if (delta < -60) goToTab(currentIndex + 1); // swipe left -> next tab
   };
 
   return (
@@ -253,338 +274,376 @@ function JobsPage() {
       <TopBar />
       <main className="mx-auto max-w-md space-y-4 px-4 pt-4">
         <section className="rounded-xl border border-border bg-surface-1 p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="rounded-sm bg-primary px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-primary-foreground">
-                <Briefcase className="inline h-3 w-3" />
-              </span>
-              <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                Jobs board
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => {
-                  if (!userId) return navigate({ to: "/auth" });
-                  setShowNotifications(true);
-                }}
-                className="relative flex items-center gap-1 rounded-full border border-border px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-primary"
-              >
-                <Bell className="h-3 w-3" />
-                {unseenMatchCount > 0 && (
-                  <span className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-0.5 font-mono text-[8px] text-white">
-                    {unseenMatchCount > 9 ? "9+" : unseenMatchCount}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={() => {
-                  if (!userId) return navigate({ to: "/auth" });
-                  setShowInterestsPicker(true);
-                }}
-                className="flex items-center gap-1 rounded-full border border-border px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-primary"
-              >
-                <Target className="h-3 w-3" /> Interests
-              </button>
-            </div>
-          </div>
-          <h1 className="mt-2 text-lg font-semibold tracking-tight">Find or post work</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Live listings plus community postings.
-          </p>
-          <div className="mt-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-            <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
-            {lastSyncedAt
-              ? `Listings synced ${timeAgo(lastSyncedAt)}`
-              : loading
-                ? "Syncing listings..."
-                : "Sync pending"}
-            {stale && <span className="text-destructive">· showing last known data</span>}
+          <div className="flex items-center gap-2">
+            <span className="rounded-sm bg-primary px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-primary-foreground">
+              <Briefcase className="inline h-3 w-3" />
+            </span>
+            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              Jobs
+            </span>
           </div>
         </section>
 
-        {showInterestsPicker && userId && (
-          <InterestsPicker
-            userId={userId}
-            initialInterests={interests}
-            onClose={() => setShowInterestsPicker(false)}
-            onSaved={handleInterestsSaved}
-          />
-        )}
-
-        {showNotifications && userId && (
-          <NotificationsPanel
-            userId={userId}
-            onClose={() => setShowNotifications(false)}
-            onAllSeen={() => setUnseenMatchCount(0)}
-          />
-        )}
-
-        {unseenMatchCount > 0 && (
-          <button
-            onClick={viewMatches}
-            className="flex w-full items-center gap-2 rounded-xl border border-primary bg-primary/10 p-3 text-left"
-          >
-            <Bell className="h-4 w-4 shrink-0 text-primary" />
-            <span className="text-sm">
-              <strong>{unseenMatchCount}</strong> new job{unseenMatchCount === 1 ? "" : "s"}{" "}
-              match your interests
-            </span>
-          </button>
-        )}
-
         <div className="flex rounded-md border border-border bg-surface-1 p-1">
-          <button
-            onClick={() => setTab("browse")}
-            className={`flex-1 rounded-sm py-2 font-mono text-[11px] uppercase tracking-wider transition ${
-              tab === "browse"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground"
-            }`}
-          >
-            Browse
-          </button>
-          <button
-            onClick={() => setTab("post")}
-            className={`flex-1 rounded-sm py-2 font-mono text-[11px] uppercase tracking-wider transition ${
-              tab === "post"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground"
-            }`}
-          >
-            Post a job
-          </button>
+          {TABS.map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`flex-1 rounded-sm py-2 font-mono text-[11px] uppercase tracking-wider transition ${
+                tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground"
+              }`}
+            >
+              {t === "browse" ? "Browse" : t === "matches" ? "Matches" : "Post"}
+            </button>
+          ))}
         </div>
 
-        {tab === "browse" ? (
-          <div className="space-y-3">
-            {interests.length > 0 && (
-              <button
-                onClick={() => setForYouOnly((v) => !v)}
-                className={`flex w-full items-center justify-center gap-1.5 rounded-md border py-2 font-mono text-[11px] uppercase tracking-wider transition ${
-                  forYouOnly
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border text-muted-foreground"
-                }`}
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                {forYouOnly ? "Showing matches for you" : `For You (${matchInfo.size})`}
-              </button>
-            )}
-
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search title, company, location"
-                className="w-full rounded-md border border-border bg-surface-1 py-2.5 pl-9 pr-3 text-sm focus:border-primary focus:outline-none"
-              />
-            </div>
-
-            <div className="relative">
-              <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                value={locationQuery}
-                onChange={(e) => setLocationQuery(e.target.value)}
-                placeholder="Filter by location (e.g. Berlin, Remote)"
-                className="w-full rounded-md border border-border bg-surface-1 py-2.5 pl-9 pr-3 text-sm focus:border-primary focus:outline-none"
-              />
-            </div>
-
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                onClick={() => setTypeFilter("All")}
-                className={`rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition ${
-                  typeFilter === "All"
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border text-muted-foreground"
-                }`}
-              >
-                All
-              </button>
-              {JOB_TYPES.map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setTypeFilter(t)}
-                  className={`rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition ${
-                    typeFilter === t
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border text-muted-foreground"
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex flex-wrap gap-1.5">
-              {RECENCY_OPTIONS.map((r) => (
-                <button
-                  key={r.value}
-                  onClick={() => setRecency(r.value)}
-                  className={`rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition ${
-                    recency === r.value
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border text-muted-foreground"
-                  }`}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-
-            {loading ? (
-              <div className="py-10 text-center font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                Loading jobs...
+        <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+          {tab === "browse" && (
+            <div className="space-y-3">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search title, company, or location"
+                  className="w-full rounded-md border border-border bg-surface-1 py-2.5 pl-9 pr-3 text-sm focus:border-primary focus:outline-none"
+                />
               </div>
-            ) : filtered.length === 0 ? (
-              <div className="rounded-md border border-dashed border-border bg-surface-1 p-6 text-center">
-                <p className="text-sm text-muted-foreground">
-                  {jobs.length === 0
-                    ? "No jobs available right now."
-                    : "No jobs match your search."}
-                </p>
-                {jobs.length === 0 && (
+
+              <button
+                onClick={() => setFiltersOpen((v) => !v)}
+                className="flex w-full items-center justify-between rounded-md border border-border bg-surface-1 px-3 py-2.5 text-sm text-muted-foreground"
+              >
+                <span className="flex items-center gap-2">
+                  <SlidersHorizontal className="h-3.5 w-3.5" /> Filters
+                </span>
+                <span className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-primary">
+                  {filtersOpen ? "Hide" : "Show"}
+                  {filtersOpen ? (
+                    <ChevronUp className="h-3.5 w-3.5" />
+                  ) : (
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  )}
+                </span>
+              </button>
+
+              {filtersOpen && (
+                <div className="space-y-3 rounded-md border border-border bg-surface-1 p-3">
+                  <div className="relative">
+                    <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      value={locationQuery}
+                      onChange={(e) => setLocationQuery(e.target.value)}
+                      placeholder="Filter by location (e.g. Berlin, Remote)"
+                      className="w-full rounded-md border border-border bg-surface-2 py-2.5 pl-9 pr-3 text-sm focus:border-primary focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      onClick={() => setTypeFilter("All")}
+                      className={`rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition ${
+                        typeFilter === "All"
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border text-muted-foreground"
+                      }`}
+                    >
+                      All
+                    </button>
+                    {JOB_TYPES.map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => setTypeFilter(t)}
+                        className={`rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition ${
+                          typeFilter === t
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-border text-muted-foreground"
+                        }`}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5">
+                    {RECENCY_OPTIONS.map((r) => (
+                      <button
+                        key={r.value}
+                        onClick={() => setRecency(r.value)}
+                        className={`rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition ${
+                          recency === r.value
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-border text-muted-foreground"
+                        }`}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
+                {lastSyncedAt
+                  ? `Feed updated ${timeAgo(lastSyncedAt)} · refreshes hourly · ${filtered.length} shown`
+                  : loading
+                    ? "Syncing listings..."
+                    : `${filtered.length} shown`}
+              </div>
+
+              {loading ? (
+                <div className="py-10 text-center font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                  Loading jobs...
+                </div>
+              ) : visibleJobs.length === 0 ? (
+                <div className="rounded-md border border-dashed border-border bg-surface-1 p-6 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    {jobs.length === 0
+                      ? "No jobs available right now."
+                      : "No jobs match your search."}
+                  </p>
+                  {jobs.length === 0 && (
+                    <button
+                      onClick={() => setTab("post")}
+                      className="mt-3 font-mono text-xs uppercase tracking-wider text-primary"
+                    >
+                      Be the first to post one →
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {visibleJobs.map((j) => (
+                    <JobCard
+                      key={j.id}
+                      job={j}
+                      userId={userId}
+                      counts={engagementMap[j.id]}
+                      interested={myReactions.has(j.id)}
+                      isSaved={!!appState.saved?.[j.id]}
+                      match={matchInfo.get(j.id) ?? null}
+                      onCountsChange={handleCountsChange}
+                      onInterestedChange={handleInterestedChange}
+                      onToggleSave={handleToggleSave}
+                    />
+                  ))}
+                  {visibleCount < filtered.length && (
+                    <button
+                      onClick={() => setVisibleCount((v) => v + PAGE_SIZE)}
+                      className="w-full rounded-md border border-border bg-surface-1 py-2.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                    >
+                      Load more ({filtered.length - visibleCount} remaining)
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === "matches" && (
+            <div className="space-y-3">
+              {!userId ? (
+                <div className="rounded-xl border border-border bg-surface-1 p-4 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    Sign in to set interests and get matched.
+                  </p>
                   <button
-                    onClick={() => setTab("post")}
+                    onClick={() => navigate({ to: "/auth" })}
                     className="mt-3 font-mono text-xs uppercase tracking-wider text-primary"
                   >
-                    Be the first to post one →
+                    Sign in →
                   </button>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {visibleJobs.map((j) => (
-                  <JobCard
-                    key={j.id}
-                    job={j}
-                    userId={userId}
-                    counts={engagementMap[j.id]}
-                    interested={myReactions.has(j.id)}
-                    isSaved={!!appState.saved?.[j.id]}
-                    match={matchInfo.get(j.id) ?? null}
-                    onCountsChange={handleCountsChange}
-                    onInterestedChange={handleInterestedChange}
-                    onToggleSave={handleToggleSave}
-                  />
-                ))}
-                {visibleCount < filtered.length && (
-                  <button
-                    onClick={() => setVisibleCount((v) => v + PAGE_SIZE)}
-                    className="w-full rounded-md border border-border bg-surface-1 py-2.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-                  >
-                    Load more ({filtered.length - visibleCount} remaining)
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div>
-              <label className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                Job title
-              </label>
-              <input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Frontend Engineer"
-                className="mt-1 w-full rounded-md border border-border bg-surface-1 px-3 py-2.5 text-sm focus:border-primary focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                Company
-              </label>
-              <input
-                value={company}
-                onChange={(e) => setCompany(e.target.value)}
-                placeholder="e.g. WorldTimeline Inc."
-                className="mt-1 w-full rounded-md border border-border bg-surface-1 px-3 py-2.5 text-sm focus:border-primary focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                Location
-              </label>
-              <input
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                placeholder="e.g. Lagos, Nigeria or Remote"
-                className="mt-1 w-full rounded-md border border-border bg-surface-1 px-3 py-2.5 text-sm focus:border-primary focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                Type
-              </label>
-              <div className="mt-1 flex flex-wrap gap-1.5">
-                {JOB_TYPES.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setType(t)}
-                    className={`rounded-full border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wider transition ${
-                      type === t
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : "border-border text-muted-foreground"
-                    }`}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                Apply URL
-              </label>
-              <input
-                value={applyUrl}
-                onChange={(e) => setApplyUrl(e.target.value)}
-                placeholder="https://..."
-                className="mt-1 w-full rounded-md border border-border bg-surface-1 px-3 py-2.5 text-sm focus:border-primary focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                Description
-              </label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={6}
-                placeholder="Role, responsibilities, requirements..."
-                className="mt-1 w-full resize-none rounded-md border border-border bg-surface-1 px-3 py-2.5 text-sm focus:border-primary focus:outline-none"
-              />
-            </div>
-
-            {err && <p className="text-[11px] text-destructive">{err}</p>}
-
-            <button
-              onClick={submit}
-              disabled={posted}
-              className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-3 font-mono text-xs uppercase tracking-wider text-primary-foreground transition disabled:opacity-50"
-            >
-              {posted ? (
-                <>
-                  <Check className="h-4 w-4" /> Posted
-                </>
+                </div>
+              ) : showInterestsPicker ? (
+                <InterestsPicker
+                  userId={userId}
+                  initialInterests={interests}
+                  onClose={() => setShowInterestsPicker(false)}
+                  onSaved={handleInterestsSaved}
+                />
               ) : (
                 <>
-                  <Send className="h-4 w-4" /> Post job
+                  <div className="rounded-xl border border-border bg-surface-1 p-4">
+                    <div className="flex items-center justify-between">
+                      <h2 className="flex items-center gap-1.5 text-sm font-semibold">
+                        <Target className="h-4 w-4 text-primary" /> Your interests
+                      </h2>
+                      <button
+                        onClick={() => setShowInterestsPicker(true)}
+                        className="font-mono text-[10px] uppercase tracking-wider text-primary underline"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      We match new job posts across the globe to your interests and notify you
+                      here.
+                    </p>
+                    {interests.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {interests.map((i) => (
+                          <span
+                            key={i}
+                            className="rounded-full bg-accent/20 px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-accent"
+                          >
+                            {i}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {interests.length === 0 ? (
+                    <button
+                      onClick={() => setShowInterestsPicker(true)}
+                      className="w-full rounded-md bg-primary py-2.5 font-mono text-xs uppercase tracking-wider text-primary-foreground"
+                    >
+                      Set your interests
+                    </button>
+                  ) : (
+                    <>
+                      <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {matchedJobs.length} matching role{matchedJobs.length === 1 ? "" : "s"}{" "}
+                        across the globe.
+                      </p>
+                      {matchedJobs.length === 0 ? (
+                        <div className="rounded-md border border-dashed border-border bg-surface-1 p-6 text-center">
+                          <p className="text-sm text-muted-foreground">
+                            No matches yet. Check back after the next sync.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {matchedJobs.map((m) => (
+                            <JobCard
+                              key={m.job.id}
+                              job={m.job}
+                              userId={userId}
+                              counts={engagementMap[m.job.id]}
+                              interested={myReactions.has(m.job.id)}
+                              isSaved={!!appState.saved?.[m.job.id]}
+                              match={m}
+                              onCountsChange={handleCountsChange}
+                              onInterestedChange={handleInterestedChange}
+                              onToggleSave={handleToggleSave}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
                 </>
               )}
-            </button>
-          </div>
-        )}
+            </div>
+          )}
+
+          {tab === "post" && (
+            <div className="space-y-3">
+              <div>
+                <label className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Job title
+                </label>
+                <input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="e.g. Frontend Engineer"
+                  className="mt-1 w-full rounded-md border border-border bg-surface-1 px-3 py-2.5 text-sm focus:border-primary focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Company
+                </label>
+                <input
+                  value={company}
+                  onChange={(e) => setCompany(e.target.value)}
+                  placeholder="e.g. WorldTimeline Inc."
+                  className="mt-1 w-full rounded-md border border-border bg-surface-1 px-3 py-2.5 text-sm focus:border-primary focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Location
+                </label>
+                <input
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  placeholder="e.g. Lagos, Nigeria or Remote"
+                  className="mt-1 w-full rounded-md border border-border bg-surface-1 px-3 py-2.5 text-sm focus:border-primary focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Type
+                </label>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {JOB_TYPES.map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setType(t)}
+                      className={`rounded-full border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wider transition ${
+                        type === t
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border text-muted-foreground"
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Apply URL
+                </label>
+                <input
+                  value={applyUrl}
+                  onChange={(e) => setApplyUrl(e.target.value)}
+                  placeholder="https://..."
+                  className="mt-1 w-full rounded-md border border-border bg-surface-1 px-3 py-2.5 text-sm focus:border-primary focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Description
+                </label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={6}
+                  placeholder="Role, responsibilities, requirements..."
+                  className="mt-1 w-full resize-none rounded-md border border-border bg-surface-1 px-3 py-2.5 text-sm focus:border-primary focus:outline-none"
+                />
+              </div>
+
+              {err && <p className="text-[11px] text-destructive">{err}</p>}
+
+              <button
+                onClick={submit}
+                disabled={posted}
+                className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-3 font-mono text-xs uppercase tracking-wider text-primary-foreground transition disabled:opacity-50"
+              >
+                {posted ? (
+                  <>
+                    <Check className="h-4 w-4" /> Posted
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4" /> Post job
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+        </div>
       </main>
       <BottomNav />
     </div>
