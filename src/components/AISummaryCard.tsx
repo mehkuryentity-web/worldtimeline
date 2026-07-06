@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { generateBriefing } from "@/lib/news.functions";
 import { supabase } from "@/integrations/supabase/client";
@@ -6,6 +6,12 @@ import { supabase } from "@/integrations/supabase/client";
 const CACHE_KEY_PREFIX = "wt:ai-briefing:v2:";
 const GUEST_ID_KEY = "wt:guest-id:v1";
 const ONE_HOUR_MS = 60 * 60 * 1000;
+
+// Simulated-stream tuning: reveal this many words per tick.
+// Backend still returns the full payload in one shot — this is
+// purely a frontend render effect, no edge function changes.
+const STREAM_MS_PER_WORD = 35;
+const STREAM_WORDS_PER_TICK = 1;
 
 interface CachedBriefing {
   summary: string;
@@ -108,6 +114,18 @@ async function resolveDisplayName(): Promise<{
 }
 
 /* -------------------------
+   SIMULATED STREAM HELPER
+   Backend returns the full text in one payload, same as before.
+   This just reveals it progressively on the frontend, word by word,
+   so it *feels* like a live stream without touching Groq/edge functions.
+--------------------------*/
+function splitIntoWords(text: string): string[] {
+  // Keep trailing whitespace attached to each word so re-joining is lossless
+  const matches = text.match(/\S+\s*/g);
+  return matches || [];
+}
+
+/* -------------------------
    COMPONENT
 --------------------------*/
 export function AISummaryCard({ headlines, country, category, mode }: Props) {
@@ -118,6 +136,75 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
   const [status, setStatus] = useState<"loading" | "ready" | "empty">(
     "loading"
   );
+
+  // What's actually rendered on screen right now (may lag behind `summary`/
+  // `conclusion` while the reveal animation is mid-flight).
+  const [displayedSummary, setDisplayedSummary] = useState<string>("");
+  const [displayedConclusion, setDisplayedConclusion] = useState<string>("");
+  const [isStreaming, setIsStreaming] = useState<boolean>(false);
+
+  // Tracks the last text we've already animated, so re-renders with
+  // identical content (e.g. cache hit followed by a matching network
+  // response) don't replay the typing effect.
+  const lastAnimatedRef = useRef<string>("");
+  const streamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  function stopStreaming() {
+    if (streamTimerRef.current) {
+      clearInterval(streamTimerRef.current);
+      streamTimerRef.current = null;
+    }
+  }
+
+  function revealProgressively(fullSummary: string, fullConclusion: string) {
+    const combinedKey = `${fullSummary}\u0000${fullConclusion}`;
+    if (combinedKey === lastAnimatedRef.current) {
+      // Already showing this exact text — just make sure it's fully rendered.
+      setDisplayedSummary(fullSummary);
+      setDisplayedConclusion(fullConclusion);
+      setIsStreaming(false);
+      return;
+    }
+
+    stopStreaming();
+    lastAnimatedRef.current = combinedKey;
+
+    const summaryWords = splitIntoWords(fullSummary);
+    const conclusionWords = splitIntoWords(fullConclusion);
+    const totalWords = summaryWords.length + conclusionWords.length;
+
+    if (totalWords === 0) {
+      setDisplayedSummary(fullSummary);
+      setDisplayedConclusion(fullConclusion);
+      setIsStreaming(false);
+      return;
+    }
+
+    setDisplayedSummary("");
+    setDisplayedConclusion("");
+    setIsStreaming(true);
+
+    let wordIndex = 0;
+    streamTimerRef.current = setInterval(() => {
+      wordIndex = Math.min(wordIndex + STREAM_WORDS_PER_TICK, totalWords);
+
+      if (wordIndex <= summaryWords.length) {
+        setDisplayedSummary(summaryWords.slice(0, wordIndex).join(""));
+      } else {
+        setDisplayedSummary(fullSummary);
+        setDisplayedConclusion(
+          conclusionWords.slice(0, wordIndex - summaryWords.length).join("")
+        );
+      }
+
+      if (wordIndex >= totalWords) {
+        stopStreaming();
+        setIsStreaming(false);
+        setDisplayedSummary(fullSummary);
+        setDisplayedConclusion(fullConclusion);
+      }
+    }, STREAM_MS_PER_WORD);
+  }
 
   useEffect(() => {
     let alive = true;
@@ -131,6 +218,7 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
         setSummary(cached.summary);
         setConclusion(cached.conclusion);
         setStatus("ready");
+        revealProgressively(cached.summary, cached.conclusion);
       } else if (alive) {
         setStatus("loading");
       }
@@ -150,6 +238,7 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
         setConclusion(res.conclusion || "");
         setCache(key, res.summary, res.conclusion || "");
         setStatus("ready");
+        revealProgressively(res.summary, res.conclusion || "");
       } else if (!cached) {
         setStatus("empty");
       }
@@ -159,6 +248,7 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
 
     return () => {
       alive = false;
+      stopStreaming();
     };
     // Re-run whenever the selected combo changes
   }, [country, category, mode, headlines.join("|")]);
@@ -188,11 +278,19 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
 
       {status === "ready" && (
         <div className="mt-2 space-y-3">
-          <p className="text-sm leading-relaxed text-foreground">{summary}</p>
+          <p className="text-sm leading-relaxed text-foreground">
+            {displayedSummary}
+            {isStreaming && displayedConclusion === "" && (
+              <span className="ml-0.5 animate-pulse text-primary">▍</span>
+            )}
+          </p>
 
-          {conclusion && (
+          {displayedConclusion && (
             <p className="text-sm leading-relaxed text-foreground">
-              {conclusion}
+              {displayedConclusion}
+              {isStreaming && (
+                <span className="ml-0.5 animate-pulse text-primary">▍</span>
+              )}
             </p>
           )}
         </div>
