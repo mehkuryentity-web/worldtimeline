@@ -71,10 +71,17 @@ function normalizeCachedJob(job: any): JobListing {
   };
 }
 
+export interface SourceStatus {
+  source: string;
+  label: string;
+  lastSyncedAt: string | null;
+  error: string | null;
+}
+
 export interface JobsFetchResult {
   jobs: JobListing[];
   lastSyncedAt: string | null;
-  stale: boolean;
+  sources: SourceStatus[];
 }
 
 /**
@@ -84,33 +91,41 @@ export interface JobsFetchResult {
  * source) come from the Supabase-cached get-jobs edge function, which
  * already merges every cached provider server-side. Both are merged here
  * so jobs.tsx doesn't need to know the difference.
+ *
+ * Freshness is reported per-source (`sources`) rather than as one blended
+ * number, so this scales cleanly to any number of future job APIs: the UI
+ * shows the freshest sync as its headline and only needs to surface a count
+ * of anything delayed, not a growing list of timestamps.
  */
 export async function getJobs(): Promise<JobsFetchResult> {
   const community = readLocal();
   let external: JobListing[] = [];
-  let lastSyncedAt: string | null = null;
-  let stale = false;
+  let sources: SourceStatus[] = [];
 
   try {
     const res = await fetch(GET_JOBS_URL, { method: "POST" });
     if (res.ok) {
       const json = await res.json();
       external = Array.isArray(json?.jobs) ? json.jobs.map(normalizeCachedJob) : [];
-      lastSyncedAt = json?.last_synced_at ?? null;
-      stale = !!json?.stale;
-    } else {
-      stale = true;
+      sources = Array.isArray(json?.sources) ? json.sources : [];
     }
   } catch {
     // Network hiccup reaching Supabase; still show community jobs.
-    stale = true;
   }
 
   const merged = [...community, ...external].sort(
     (a, b) => new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime()
   );
 
-  return { jobs: merged, lastSyncedAt, stale };
+  const syncedTimestamps = sources
+    .map((s) => s.lastSyncedAt)
+    .filter((t): t is string => !!t)
+    .map((t) => new Date(t).getTime());
+  const lastSyncedAt = syncedTimestamps.length
+    ? new Date(Math.max(...syncedTimestamps)).toISOString()
+    : null;
+
+  return { jobs: merged, lastSyncedAt, sources };
 }
 
 export async function postJob(
