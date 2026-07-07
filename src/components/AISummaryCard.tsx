@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { generateBriefing } from "@/lib/news.functions";
 import { supabase } from "@/integrations/supabase/client";
@@ -141,7 +141,16 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
   // opened an article and came back) — no replaying the animation.
   const [shouldAnimate, setShouldAnimate] = useState<boolean>(true);
 
-  function markAndCheckAnimate(fullSummary: string, fullConclusion: string) {
+  // Guards against a second reveal within the SAME visit: the cache (step 1)
+  // and the network response (step 3) can each call setSummary, sometimes
+  // with slightly different text if Groq regenerated it. Only the first of
+  // those two should ever be allowed to animate.
+  const firstRevealDoneRef = useRef(false);
+
+  function decideAnimate(fullSummary: string, fullConclusion: string) {
+    if (firstRevealDoneRef.current) return false;
+    firstRevealDoneRef.current = true;
+
     const combinedKey = `${fullSummary}\u0000${fullConclusion}`;
     if (streamedThisSession.has(combinedKey)) return false;
     streamedThisSession.add(combinedKey);
@@ -157,7 +166,7 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
       // STEP 1: instant local cache render (zero wait, if we have it)
       const cached = getCache(key);
       if (cached && alive) {
-        setShouldAnimate(markAndCheckAnimate(cached.summary, cached.conclusion));
+        setShouldAnimate(decideAnimate(cached.summary, cached.conclusion));
         setSummary(cached.summary);
         setConclusion(cached.conclusion);
         setStatus("ready");
@@ -176,7 +185,7 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
       if (!alive) return;
 
       if (typeof res?.summary === "string" && res.summary.trim().length > 0) {
-        setShouldAnimate(markAndCheckAnimate(res.summary, res.conclusion || ""));
+        setShouldAnimate(decideAnimate(res.summary, res.conclusion || ""));
         setSummary(res.summary);
         setConclusion(res.conclusion || "");
         setCache(key, res.summary, res.conclusion || "");
