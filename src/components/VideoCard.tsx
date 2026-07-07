@@ -3,6 +3,7 @@ import { Play, Eye, Clock } from "lucide-react";
 import type { VideoListing } from "@/lib/videos";
 import { formatViewCount } from "@/lib/videos";
 import { timeAgo } from "@/lib/format";
+import { VideoReactionBar } from "./VideoReactionBar";
 
 interface Props {
   video: VideoListing;
@@ -11,6 +12,12 @@ interface Props {
 export function VideoCard({ video }: Props) {
   const [playing, setPlaying] = useState(false);
   const viewLabel = formatViewCount(video.viewCount);
+
+  // Full native YouTube controls (default controls=1) -- play/pause, seek
+  // bar, volume, fullscreen, captions, all included. Only rel=0 and
+  // modestbranding=1 are set, to keep related-video suggestions and the
+  // YouTube logo from cluttering the card.
+  const embedSrc = `${video.embedUrl}?autoplay=1&playsinline=1&rel=0&modestbranding=1`;
 
   return (
     <article className="overflow-hidden rounded-xl border border-border bg-surface-1">
@@ -30,7 +37,7 @@ export function VideoCard({ video }: Props) {
           // dozens of cards should never mean dozens of iframes loading at
           // once (same connection-pool lesson learned from the Jobs feed).
           <iframe
-            src={`${video.embedUrl}?autoplay=1`}
+            src={embedSrc}
             title={video.title}
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen
@@ -79,6 +86,8 @@ export function VideoCard({ video }: Props) {
           )}
         </div>
       </div>
+
+      <VideoReactionBar video={video} />
     </article>
   );
 }
