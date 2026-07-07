@@ -49,18 +49,23 @@ type Mode =
   | "custom";
 
 function Home() {
-  const [category, setCategory] = useState<Category>("Top");
   const { state, award, update } = useAppState();
+
+  const [category, setCategoryState] = useState<Category>(
+    () => (state.category as Category) ?? "Top"
+  );
 
   const [country, setCountryState] = useState<string>(
     () => state.country ?? "GLOBAL"
   );
 
-  const [mode, setMode] = useState<Mode>("all");
+  const [mode, setModeState] = useState<Mode>(
+    () => (state.feedMode as Mode) ?? "all"
+  );
 
-  const [customRange, setCustomRange] = useState({
-    hours: "",
-    minutes: "",
+  const [customRange, setCustomRangeState] = useState({
+    hours: state.customRangeHours ?? "",
+    minutes: state.customRangeMinutes ?? "",
   });
 
   const preloadedBatchesRef = useRef<Set<string>>(new Set());
@@ -69,6 +74,33 @@ function Home() {
   const setCountry = (code: string) => {
     setCountryState(code);
     update((s) => ({ ...s, country: code }));
+  };
+
+  const setCategory = (c: Category) => {
+    setCategoryState(c);
+    update((s) => ({ ...s, category: c }));
+  };
+
+  const setMode = (m: Mode) => {
+    setModeState(m);
+    update((s) => ({ ...s, feedMode: m }));
+  };
+
+  const setCustomRange = (
+    updater: (p: { hours: string; minutes: string }) => {
+      hours: string;
+      minutes: string;
+    }
+  ) => {
+    setCustomRangeState((prev) => {
+      const next = updater(prev);
+      update((s) => ({
+        ...s,
+        customRangeHours: next.hours,
+        customRangeMinutes: next.minutes,
+      }));
+      return next;
+    });
   };
 
   useEffect(() => {
