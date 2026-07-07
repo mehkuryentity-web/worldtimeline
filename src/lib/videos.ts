@@ -32,10 +32,18 @@ const GET_VIDEOS_URL =
  * reports freshness per-source, so adding a 2nd/Nth video API later needs
  * no changes here or in the UI -- just one more entry in that sources[]
  * array on the backend.
+ *
+ * country is the app's country code (e.g. "NG", "AR", "GLOBAL") -- the
+ * backend filters video_archive by region_code, blending all regions when
+ * GLOBAL is requested or a region hasn't synced any videos yet.
  */
-export async function getVideos(): Promise<VideosFetchResult> {
+export async function getVideos(country: string): Promise<VideosFetchResult> {
   try {
-    const res = await fetch(GET_VIDEOS_URL, { method: "POST" });
+    const res = await fetch(GET_VIDEOS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ country }),
+    });
     if (!res.ok) return { videos: [], sources: [] };
     const json = await res.json();
     return {
