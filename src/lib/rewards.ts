@@ -63,6 +63,10 @@ export interface AppState {
   saved: Record<string, SavedItem>;
   userPosts: UserPost[];
   country?: string;
+  category?: string;
+  feedMode?: string;
+  customRangeHours?: string;
+  customRangeMinutes?: string;
 }
 
 const empty: AppState = {
