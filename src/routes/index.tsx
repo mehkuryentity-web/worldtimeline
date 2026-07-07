@@ -8,6 +8,7 @@ import { AISummaryCard } from "@/components/AISummaryCard";
 import { CategoryTabs } from "@/components/CategoryTabs";
 import { CountrySelector } from "@/components/CountrySelector";
 import { NewsCard } from "@/components/NewsCard";
+import { VideoCard } from "@/components/VideoCard";
 import { Ticker } from "@/components/Ticker";
 
 import {
@@ -22,6 +23,7 @@ import { Loader2, Timer } from "lucide-react";
 
 import { fetchPreloadedSummaries } from "@/lib/news.functions";
 import { enqueueArticles } from "@/lib/intelligence/preloadEngine";
+import { getVideos, type VideoListing } from "@/lib/videos";
 
 export const Route = createFileRoute("/")({
   component: Home,
@@ -239,6 +241,46 @@ function Home() {
     }
   }, [items]);
 
+  // ---- VIDEO FEED (mixed into the main feed, not a separate tab) ----
+  // Fetched independently of articles so a Supabase hiccup here never
+  // blocks the article feed from rendering.
+  const { data: videosData } = useQuery({
+    queryKey: ["videos"],
+    queryFn: getVideos,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+
+  const videoItems: VideoListing[] = videosData?.videos ?? [];
+
+  // Same time-window filter as articles, so switching "5 min / 24h / Custom"
+  // applies consistently to both.
+  const filteredVideos =
+    mode === "all"
+      ? videoItems
+      : videoItems.filter((v) => {
+          const age = now - new Date(v.publishedAt).getTime();
+          return age <= windowMs;
+        });
+
+  type FeedEntry = { publishedAt: string; node: JSX.Element };
+
+  const feedEntries: FeedEntry[] = [
+    ...items.map((item) => ({
+      publishedAt: item.publishedAt,
+      node: <NewsCard key={`a-${item.id}`} item={item} />,
+    })),
+    ...filteredVideos.map((v) => ({
+      publishedAt: v.publishedAt,
+      node: <VideoCard key={`v-${v.id}`} video={v} />,
+    })),
+  ].sort((a, b) => {
+    const ta = new Date(a.publishedAt).getTime();
+    const tb = new Date(b.publishedAt).getTime();
+    return mode === "all" ? tb - ta : ta - tb;
+  });
+
+
   const isCustomValid =
     customRange.hours.trim() !== "" ||
     customRange.minutes.trim() !== "";
@@ -325,9 +367,7 @@ function Home() {
         )}
 
         <div className="space-y-3">
-          {items.map((item) => (
-            <NewsCard key={item.id} item={item} />
-          ))}
+          {feedEntries.map((entry) => entry.node)}
         </div>
       </main>
 
