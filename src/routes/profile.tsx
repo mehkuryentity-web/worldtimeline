@@ -1,11 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Zap, Trophy, Wallet, Activity, Calendar, Trash2, LogOut, LogIn } from "lucide-react";
+import { useState } from "react";
+import { Zap, Trophy, Wallet, Activity, Calendar, Trash2, LogOut, LogIn, MessageSquarePlus, Check } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
 import { useAppState } from "@/hooks/use-app-state";
 import { useUser } from "@/hooks/use-user";
 import { getCycle, pointsToUSD, POINTS } from "@/lib/rewards";
 import { timeAgo, timeLeft } from "@/lib/format";
+import { submitFeedback, type FeedbackCategory } from "@/lib/feedback";
 
 export const Route = createFileRoute("/profile")({
   head: () => ({
@@ -25,6 +27,30 @@ function ProfilePage() {
   const totalActions = state.history.length;
   const totalComments = Object.values(state.articles).reduce((n, a) => n + a.comments.length, 0);
   const totalReactions = Object.values(state.articles).filter((a) => a.reaction).length;
+
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackCategory, setFeedbackCategory] = useState<FeedbackCategory>("idea");
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [feedbackEmail, setFeedbackEmail] = useState("");
+  const [feedbackStatus, setFeedbackStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+
+  const submitFeedbackForm = async () => {
+    if (!feedbackMessage.trim() || feedbackStatus === "sending") return;
+    setFeedbackStatus("sending");
+    try {
+      await submitFeedback({
+        category: feedbackCategory,
+        message: feedbackMessage,
+        email: feedbackEmail || user?.email || null,
+        userId: user?.id || null,
+      });
+      setFeedbackStatus("sent");
+      setFeedbackMessage("");
+      setFeedbackEmail("");
+    } catch {
+      setFeedbackStatus("error");
+    }
+  };
 
   const resetAll = () => {
     if (!confirm("Reset all local activity and points?")) return;
@@ -179,6 +205,83 @@ function ProfilePage() {
               ))
             )}
           </div>
+        </section>
+        {/* Feedback */}
+        <section className="overflow-hidden rounded-xl border border-border bg-surface-1">
+          <button
+            onClick={() => setFeedbackOpen((v) => !v)}
+            className="flex w-full items-center justify-between px-4 py-3"
+          >
+            <span className="flex items-center gap-2">
+              <MessageSquarePlus className="h-3.5 w-3.5 text-primary" />
+              <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                Send feedback
+              </span>
+            </span>
+            <span className="font-mono text-[10px] text-muted-foreground">
+              {feedbackOpen ? "Close" : "Open"}
+            </span>
+          </button>
+
+          {feedbackOpen && (
+            <div className="border-t border-border px-4 py-3">
+              {feedbackStatus === "sent" ? (
+                <div className="flex items-center gap-2 py-3 text-sm text-primary">
+                  <Check className="h-4 w-4" />
+                  Thanks — feedback sent.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex gap-2">
+                    {(["idea", "bug", "other"] as FeedbackCategory[]).map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => setFeedbackCategory(c)}
+                        className={`flex-1 rounded-md border px-2 py-1.5 font-mono text-[10px] uppercase tracking-wider transition ${
+                          feedbackCategory === c
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border text-muted-foreground"
+                        }`}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+
+                  <textarea
+                    value={feedbackMessage}
+                    onChange={(e) => setFeedbackMessage(e.target.value)}
+                    placeholder="What's on your mind?"
+                    rows={3}
+                    className="w-full resize-none rounded-md border border-border bg-surface-2 px-3 py-2 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                  />
+
+                  {!user && (
+                    <input
+                      value={feedbackEmail}
+                      onChange={(e) => setFeedbackEmail(e.target.value)}
+                      placeholder="Email (optional, if you'd like a reply)"
+                      className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                    />
+                  )}
+
+                  {feedbackStatus === "error" && (
+                    <p className="text-xs text-destructive">
+                      Something went wrong — try again.
+                    </p>
+                  )}
+
+                  <button
+                    onClick={submitFeedbackForm}
+                    disabled={!feedbackMessage.trim() || feedbackStatus === "sending"}
+                    className="w-full rounded-md bg-primary px-3 py-2 font-mono text-[11px] uppercase tracking-wider text-primary-foreground disabled:opacity-50"
+                  >
+                    {feedbackStatus === "sending" ? "Sending…" : "Submit feedback"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </section>
       </main>
       <BottomNav />
