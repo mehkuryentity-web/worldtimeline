@@ -245,8 +245,8 @@ function Home() {
   // Fetched independently of articles so a Supabase hiccup here never
   // blocks the article feed from rendering.
   const { data: videosData } = useQuery({
-    queryKey: ["videos"],
-    queryFn: getVideos,
+    queryKey: ["videos", country],
+    queryFn: () => getVideos(country),
     staleTime: 5 * 60 * 1000,
     retry: false,
   });
