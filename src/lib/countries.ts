@@ -29,6 +29,7 @@ export const COUNTRIES: Country[] = [
   { code: "AE", name: "UAE", flag: "🇦🇪" },
   { code: "SA", name: "Saudi Arabia", flag: "🇸🇦" },
   { code: "TR", name: "Turkey", flag: "🇹🇷" },
+  { code: "AR", name: "Argentina", flag: "🇦🇷" },
 ];
 
 export function findCountry(code: string): Country {
