@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { generateBriefing } from "@/lib/news.functions";
 import { supabase } from "@/integrations/supabase/client";
@@ -7,11 +7,11 @@ const CACHE_KEY_PREFIX = "wt:ai-briefing:v2:";
 const GUEST_ID_KEY = "wt:guest-id:v1";
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
-// Simulated-stream tuning: reveal this many words per tick.
-// Backend still returns the full payload in one shot — this is
-// purely a frontend render effect, no edge function changes.
-const STREAM_MS_PER_WORD = 90;
-const STREAM_WORDS_PER_TICK = 1;
+// Blur-to-focus reveal tuning. Backend still returns the full payload in
+// one shot — this is purely a frontend render effect (CSS animation),
+// no edge function or streaming changes.
+const BLUR_STAGGER_MS = 90; // delay between each word starting its reveal
+const BLUR_DURATION_MS = 500; // how long each word takes to sharpen/fade in
 
 interface CachedBriefing {
   summary: string;
@@ -113,12 +113,10 @@ async function resolveDisplayName(): Promise<{
   return { name: getOrCreateGuestId(), isGuest: true };
 }
 
-/* -------------------------
-   SIMULATED STREAM HELPER
-   Backend returns the full text in one payload, same as before.
-   This just reveals it progressively on the frontend, word by word,
-   so it *feels* like a live stream without touching Groq/edge functions.
---------------------------*/
+// Tracks briefing text that has already been fully streamed once during
+// this browser session (module scope survives component remounts —
+// e.g. opening then closing an article — but resets on a hard page reload).
+const streamedThisSession = new Set<string>();
 function splitIntoWords(text: string): string[] {
   // Keep trailing whitespace attached to each word so re-joining is lossless
   const matches = text.match(/\S+\s*/g);
@@ -137,73 +135,17 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
     "loading"
   );
 
-  // What's actually rendered on screen right now (may lag behind `summary`/
-  // `conclusion` while the reveal animation is mid-flight).
-  const [displayedSummary, setDisplayedSummary] = useState<string>("");
-  const [displayedConclusion, setDisplayedConclusion] = useState<string>("");
-  const [isStreaming, setIsStreaming] = useState<boolean>(false);
+  // Whether the *current* summary/conclusion should play the blur-to-focus
+  // reveal, or just render fully sharp immediately. False whenever this
+  // exact text has already been shown once this session (e.g. the user
+  // opened an article and came back) — no replaying the animation.
+  const [shouldAnimate, setShouldAnimate] = useState<boolean>(true);
 
-  // Tracks the last text we've already animated, so re-renders with
-  // identical content (e.g. cache hit followed by a matching network
-  // response) don't replay the typing effect.
-  const lastAnimatedRef = useRef<string>("");
-  const streamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  function stopStreaming() {
-    if (streamTimerRef.current) {
-      clearInterval(streamTimerRef.current);
-      streamTimerRef.current = null;
-    }
-  }
-
-  function revealProgressively(fullSummary: string, fullConclusion: string) {
+  function markAndCheckAnimate(fullSummary: string, fullConclusion: string) {
     const combinedKey = `${fullSummary}\u0000${fullConclusion}`;
-    if (combinedKey === lastAnimatedRef.current) {
-      // Already showing this exact text — just make sure it's fully rendered.
-      setDisplayedSummary(fullSummary);
-      setDisplayedConclusion(fullConclusion);
-      setIsStreaming(false);
-      return;
-    }
-
-    stopStreaming();
-    lastAnimatedRef.current = combinedKey;
-
-    const summaryWords = splitIntoWords(fullSummary);
-    const conclusionWords = splitIntoWords(fullConclusion);
-    const totalWords = summaryWords.length + conclusionWords.length;
-
-    if (totalWords === 0) {
-      setDisplayedSummary(fullSummary);
-      setDisplayedConclusion(fullConclusion);
-      setIsStreaming(false);
-      return;
-    }
-
-    setDisplayedSummary("");
-    setDisplayedConclusion("");
-    setIsStreaming(true);
-
-    let wordIndex = 0;
-    streamTimerRef.current = setInterval(() => {
-      wordIndex = Math.min(wordIndex + STREAM_WORDS_PER_TICK, totalWords);
-
-      if (wordIndex <= summaryWords.length) {
-        setDisplayedSummary(summaryWords.slice(0, wordIndex).join(""));
-      } else {
-        setDisplayedSummary(fullSummary);
-        setDisplayedConclusion(
-          conclusionWords.slice(0, wordIndex - summaryWords.length).join("")
-        );
-      }
-
-      if (wordIndex >= totalWords) {
-        stopStreaming();
-        setIsStreaming(false);
-        setDisplayedSummary(fullSummary);
-        setDisplayedConclusion(fullConclusion);
-      }
-    }, STREAM_MS_PER_WORD);
+    if (streamedThisSession.has(combinedKey)) return false;
+    streamedThisSession.add(combinedKey);
+    return true;
   }
 
   useEffect(() => {
@@ -215,10 +157,10 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
       // STEP 1: instant local cache render (zero wait, if we have it)
       const cached = getCache(key);
       if (cached && alive) {
+        setShouldAnimate(markAndCheckAnimate(cached.summary, cached.conclusion));
         setSummary(cached.summary);
         setConclusion(cached.conclusion);
         setStatus("ready");
-        revealProgressively(cached.summary, cached.conclusion);
       } else if (alive) {
         setStatus("loading");
       }
@@ -234,11 +176,11 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
       if (!alive) return;
 
       if (typeof res?.summary === "string" && res.summary.trim().length > 0) {
+        setShouldAnimate(markAndCheckAnimate(res.summary, res.conclusion || ""));
         setSummary(res.summary);
         setConclusion(res.conclusion || "");
         setCache(key, res.summary, res.conclusion || "");
         setStatus("ready");
-        revealProgressively(res.summary, res.conclusion || "");
       } else if (!cached) {
         setStatus("empty");
       }
@@ -248,10 +190,16 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
 
     return () => {
       alive = false;
-      stopStreaming();
     };
     // Re-run whenever the selected combo changes
   }, [country, category, mode, headlines.join("|")]);
+
+  // Word arrays for the blur-reveal render, with a continuous stagger index
+  // running from the start of the summary through to the end of the
+  // conclusion, so the two paragraphs read as one continuous reveal.
+  const summaryWords = splitIntoWords(summary);
+  const conclusionWords = splitIntoWords(conclusion);
+  const summaryWordCount = summaryWords.length;
 
   return (
     <div className="rounded-xl border border-primary/40 bg-surface-1 p-4 text-foreground glow-primary">
@@ -279,19 +227,63 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
       {status === "ready" && (
         <div className="mt-2 space-y-3">
           <p className="text-sm leading-relaxed text-foreground">
-            {displayedSummary}
-            {isStreaming && displayedConclusion === "" && (
-              <span className="ml-0.5 animate-pulse text-primary">▍</span>
-            )}
+            {summaryWords.map((word, i) => (
+              <span
+                key={`s-${i}`}
+                className={shouldAnimate ? "wt-blur-word" : undefined}
+                style={
+                  shouldAnimate
+                    ? { animationDelay: `${i * BLUR_STAGGER_MS}ms` }
+                    : undefined
+                }
+              >
+                {word}
+              </span>
+            ))}
           </p>
 
-          {displayedConclusion && (
+          {conclusionWords.length > 0 && (
             <p className="text-sm leading-relaxed text-foreground">
-              {displayedConclusion}
-              {isStreaming && (
-                <span className="ml-0.5 animate-pulse text-primary">▍</span>
-              )}
+              {conclusionWords.map((word, i) => (
+                <span
+                  key={`c-${i}`}
+                  className={shouldAnimate ? "wt-blur-word" : undefined}
+                  style={
+                    shouldAnimate
+                      ? {
+                          animationDelay: `${
+                            (summaryWordCount + i) * BLUR_STAGGER_MS
+                          }ms`,
+                        }
+                      : undefined
+                  }
+                >
+                  {word}
+                </span>
+              ))}
             </p>
+          )}
+
+          {shouldAnimate && (
+            <style>{`
+              @keyframes wt-blur-in {
+                from {
+                  opacity: 0;
+                  filter: blur(6px);
+                  transform: translateY(2px);
+                }
+                to {
+                  opacity: 1;
+                  filter: blur(0);
+                  transform: translateY(0);
+                }
+              }
+              .wt-blur-word {
+                display: inline-block;
+                white-space: pre;
+                animation: wt-blur-in ${BLUR_DURATION_MS}ms ease-out both;
+              }
+            `}</style>
           )}
         </div>
       )}
