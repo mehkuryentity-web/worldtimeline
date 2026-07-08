@@ -1,6 +1,6 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ArrowLeft, ExternalLink, Loader2 } from "lucide-react";
+import { ArrowLeft, ExternalLink, Loader2, MessageCircle } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
 import { ReactionBar } from "@/components/ReactionBar";
@@ -11,9 +11,14 @@ export const Route = createFileRoute("/article/$id")({
   component: ArticlePage,
 });
 
-const KEY = "wt_summary_v3";
+const KEY = "wt_summary_v4";
 
-function load(id: string) {
+interface StoredSummary {
+  lines: string[];
+  hook: string | null;
+}
+
+function load(id: string): StoredSummary | null {
   try {
     const raw = localStorage.getItem(KEY);
     return raw ? JSON.parse(raw)[id] : null;
@@ -22,11 +27,11 @@ function load(id: string) {
   }
 }
 
-function save(id: string, lines: string[]) {
+function save(id: string, data: StoredSummary) {
   try {
     const raw = localStorage.getItem(KEY);
     const map = raw ? JSON.parse(raw) : {};
-    map[id] = lines;
+    map[id] = data;
     localStorage.setItem(KEY, JSON.stringify(map));
   } catch {}
 }
@@ -51,8 +56,20 @@ export function ArticlePage() {
 
 
   const [item] = useState<NewsItem | null>(() => getCachedArticle(id));
-  const [lines, setLines] = useState<string[]>(() => load(id) ?? []);
+  const [lines, setLines] = useState<string[]>(() => load(id)?.lines ?? []);
+  const [hook, setHook] = useState<string | null>(() => load(id)?.hook ?? null);
   const [loading, setLoading] = useState(false);
+  // Bumping this forces ReactionBar to remount with comments pre-opened --
+  // it only reads defaultCommentsOpen on its own initial mount, so a plain
+  // prop change wouldn't reopen it on its own.
+  const [commentsKey, setCommentsKey] = useState(0);
+  const [commentsOpenOnMount, setCommentsOpenOnMount] = useState(false);
+
+  const jumpToComments = () => {
+    setCommentsOpenOnMount(true);
+    setCommentsKey((k) => k + 1);
+    document.getElementById("article-reaction-bar")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   useEffect(() => {
     if (!item) return;
@@ -71,10 +88,12 @@ export function ArticlePage() {
       });
 
       const out = data?.lines;
+      const outHook = typeof data?.hook === "string" ? data.hook : null;
 
       if (Array.isArray(out) && out.every((l) => typeof l === "string")) {
         setLines(out);
-        save(item.id, out);
+        setHook(outHook);
+        save(item.id, { lines: out, hook: outHook });
       }
 
       setLoading(false);
@@ -117,7 +136,24 @@ export function ArticlePage() {
           </a>
         )}
 
-        <ReactionBar item={item} showReadLink={false} />
+        {hook && (
+          <button
+            onClick={jumpToComments}
+            className="flex w-full items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-left text-sm text-foreground transition hover:border-primary/60"
+          >
+            <MessageCircle className="h-4 w-4 shrink-0 text-primary" />
+            <span>{hook}</span>
+          </button>
+        )}
+
+        <div id="article-reaction-bar">
+          <ReactionBar
+            key={commentsKey}
+            item={item}
+            showReadLink={false}
+            defaultCommentsOpen={commentsOpenOnMount}
+          />
+        </div>
       </main>
 
       <BottomNav />
