@@ -111,6 +111,9 @@ function Home() {
 
   const { data, isLoading } = useQuery({
     queryKey: ["news", country, category],
+    // "Video" isn't a real news category -- that tab is video-only, so
+    // there's no point spending an API call that would just come back empty.
+    enabled: category !== "Video",
     queryFn: async () => {
       try {
         const res = await fetch(
@@ -265,20 +268,48 @@ function Home() {
 
   type FeedEntry = { publishedAt: string; node: JSX.Element };
 
-  const feedEntries: FeedEntry[] = [
-    ...items.map((item) => ({
-      publishedAt: item.publishedAt,
-      node: <NewsCard key={`a-${item.id}`} item={item} />,
-    })),
-    ...filteredVideos.map((v) => ({
-      publishedAt: v.publishedAt,
-      node: <VideoCard key={`v-${v.id}`} video={v} />,
-    })),
-  ].sort((a, b) => {
+  // Fixed cadence instead of a pure chronological merge: YouTube's trending
+  // videos are often days old even while currently trending, so sorting
+  // purely by publishedAt sank every video to the bottom, under the freshest
+  // articles. One video after every 3 articles, both lists pre-sorted by
+  // recency within themselves.
+  const ARTICLES_PER_VIDEO = 3;
+
+  const sortedVideos = [...filteredVideos].sort((a, b) => {
     const ta = new Date(a.publishedAt).getTime();
     const tb = new Date(b.publishedAt).getTime();
     return mode === "all" ? tb - ta : ta - tb;
   });
+
+  const feedEntries: FeedEntry[] = [];
+  let videoIdx = 0;
+
+  items.forEach((item, i) => {
+    feedEntries.push({
+      publishedAt: item.publishedAt,
+      node: <NewsCard key={`a-${item.id}`} item={item} />,
+    });
+
+    if ((i + 1) % ARTICLES_PER_VIDEO === 0 && videoIdx < sortedVideos.length) {
+      const v = sortedVideos[videoIdx];
+      feedEntries.push({
+        publishedAt: v.publishedAt,
+        node: <VideoCard key={`v-${v.id}`} video={v} />,
+      });
+      videoIdx++;
+    }
+  });
+
+  // Leftover videos (including ALL of them when category === "Video", since
+  // items is empty there): append in order rather than dropping them.
+  while (videoIdx < sortedVideos.length) {
+    const v = sortedVideos[videoIdx];
+    feedEntries.push({
+      publishedAt: v.publishedAt,
+      node: <VideoCard key={`v-${v.id}`} video={v} />,
+    });
+    videoIdx++;
+  }
 
 
   const isCustomValid =
