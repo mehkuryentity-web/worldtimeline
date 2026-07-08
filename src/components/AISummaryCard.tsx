@@ -147,8 +147,12 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
   // those two should ever be allowed to animate.
   const firstRevealDoneRef = useRef(false);
 
-  function decideAnimate(fullSummary: string, fullConclusion: string) {
-    if (firstRevealDoneRef.current) return false;
+  function decideAnimate(fullSummary: string, fullConclusion: string): boolean | null {
+    // null = "a decision was already made this mount, don't touch state" --
+    // critical for not yanking the animation class off words that are still
+    // mid-flight when a second update (e.g. network confirming the cache)
+    // arrives moments later.
+    if (firstRevealDoneRef.current) return null;
     firstRevealDoneRef.current = true;
 
     const combinedKey = `${fullSummary}\u0000${fullConclusion}`;
@@ -166,7 +170,8 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
       // STEP 1: instant local cache render (zero wait, if we have it)
       const cached = getCache(key);
       if (cached && alive) {
-        setShouldAnimate(decideAnimate(cached.summary, cached.conclusion));
+        const anim = decideAnimate(cached.summary, cached.conclusion);
+        if (anim !== null) setShouldAnimate(anim);
         setSummary(cached.summary);
         setConclusion(cached.conclusion);
         setStatus("ready");
@@ -185,7 +190,8 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
       if (!alive) return;
 
       if (typeof res?.summary === "string" && res.summary.trim().length > 0) {
-        setShouldAnimate(decideAnimate(res.summary, res.conclusion || ""));
+        const anim = decideAnimate(res.summary, res.conclusion || "");
+        if (anim !== null) setShouldAnimate(anim);
         setSummary(res.summary);
         setConclusion(res.conclusion || "");
         setCache(key, res.summary, res.conclusion || "");
