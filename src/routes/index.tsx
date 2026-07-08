@@ -290,34 +290,53 @@ function Home() {
   });
 
   const feedEntries: FeedEntry[] = [];
-  let videoIdx = 0;
 
-  items.forEach((item, i) => {
-    feedEntries.push({
-      publishedAt: item.publishedAt,
-      node: <NewsCard key={`a-${item.id}`} item={item} />,
-    });
-
-    if ((i + 1) % ARTICLES_PER_VIDEO === 0 && videoIdx < sortedVideos.length) {
-      const v = sortedVideos[videoIdx];
+  if (category === "Videos") {
+    // Dedicated video-only tab: show every matched video (no articles to
+    // interleave with anyway -- items is empty here by design).
+    sortedVideos.forEach((v) => {
       feedEntries.push({
         publishedAt: v.publishedAt,
         node: <VideoCard key={`v-${v.id}`} video={v} />,
       });
-      videoIdx++;
-    }
-  });
-
-  // Leftover videos (including ALL of them when category === "Videos", since
-  // items is empty there): append in order rather than dropping them.
-  while (videoIdx < sortedVideos.length) {
-    const v = sortedVideos[videoIdx];
-    feedEntries.push({
-      publishedAt: v.publishedAt,
-      node: <VideoCard key={`v-${v.id}`} video={v} />,
     });
-    videoIdx++;
+  } else {
+    // Mixed feed: strict 1-video-per-3-articles cadence. Any videos beyond
+    // what the current article count actually supports are held back
+    // rather than dumped back-to-back at the end -- that pile-up was the
+    // bug. They'll surface naturally as more articles load via Load More.
+    let videoIdx = 0;
+
+    items.forEach((item, i) => {
+      feedEntries.push({
+        publishedAt: item.publishedAt,
+        node: <NewsCard key={`a-${item.id}`} item={item} />,
+      });
+
+      if ((i + 1) % ARTICLES_PER_VIDEO === 0 && videoIdx < sortedVideos.length) {
+        const v = sortedVideos[videoIdx];
+        feedEntries.push({
+          publishedAt: v.publishedAt,
+          node: <VideoCard key={`v-${v.id}`} video={v} />,
+        });
+        videoIdx++;
+      }
+    });
   }
+
+  // ---- PAGINATION (Load More) ----
+  // feedEntries above is the full, correctly-cadenced set already fetched;
+  // this just controls how much of it is actually rendered at once, and
+  // reveals more on demand instead of dumping everything in one shot.
+  const PAGE_SIZE = 12;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [country, category, mode]);
+
+  const visibleEntries = feedEntries.slice(0, visibleCount);
+  const hasMore = visibleCount < feedEntries.length;
 
 
   // ---- BRIEFING INPUT: category-aware ----
@@ -419,8 +438,17 @@ function Home() {
         )}
 
         <div className="space-y-3">
-          {feedEntries.map((entry) => entry.node)}
+          {visibleEntries.map((entry) => entry.node)}
         </div>
+
+        {hasMore && (
+          <button
+            onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+            className="w-full rounded-lg border border-border bg-surface-1 py-2.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition hover:border-primary/60 hover:text-foreground"
+          >
+            Load more
+          </button>
+        )}
       </main>
 
       <BottomNav />
