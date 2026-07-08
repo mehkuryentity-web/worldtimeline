@@ -24,7 +24,7 @@ import { Loader2, Timer } from "lucide-react";
 
 import { fetchPreloadedSummaries } from "@/lib/news.functions";
 import { enqueueArticles } from "@/lib/intelligence/preloadEngine";
-import { getVideos, type VideoListing } from "@/lib/videos";
+import { getVideos, formatViewCount, type VideoListing } from "@/lib/videos";
 
 export const Route = createFileRoute("/")({
   component: Home,
@@ -320,6 +320,19 @@ function Home() {
   }
 
 
+  // ---- BRIEFING INPUT: category-aware ----
+  // Videos tab has no articles to summarize (items is empty there by
+  // design), so feed the briefing top 5 videos' title/channel/view-count
+  // instead -- same pipeline, different "headlines" content. Everywhere
+  // else, real category-filtered article titles as before.
+  const briefingHeadlines: string[] =
+    category === "Videos"
+      ? sortedVideos.slice(0, 5).map((v) => {
+          const views = formatViewCount(v.viewCount);
+          return `${v.title} — ${v.channelTitle}${views ? ` (${views})` : ""}`;
+        })
+      : items.slice(0, 6).map((i) => i.title);
+
   const isCustomValid =
     customRange.hours.trim() !== "" ||
     customRange.minutes.trim() !== "";
@@ -334,7 +347,7 @@ function Home() {
 
       <main className="mx-auto max-w-md space-y-4 px-4 pt-4 pb-6">
         <AISummaryCard
-          headlines={items.slice(0, 6).map((i) => i.title)}
+          headlines={briefingHeadlines}
           country={country}
           category={category}
           mode={mode}
