@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { ArrowLeft, ExternalLink, Loader2 } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
@@ -33,6 +33,22 @@ function save(id: string, lines: string[]) {
 
 export function ArticlePage() {
   const { id } = Route.useParams();
+  const router = useRouter();
+
+  const goBack = () => {
+    // history.back() is a POP navigation, which is what the router's
+    // scrollRestoration actually tracks -- Link to="/" was a PUSH (a fresh
+    // visit), which always lands at the top regardless of where the user
+    // scrolled to before opening this article.
+    if (window.history.length > 1) {
+      router.history.back();
+    } else {
+      // Deep-linked straight into this article (no prior in-app page) --
+      // nothing to go back to, so fall back to a normal visit to the feed.
+      router.navigate({ to: "/" });
+    }
+  };
+
 
   const [item] = useState<NewsItem | null>(() => getCachedArticle(id));
   const [lines, setLines] = useState<string[]>(() => load(id) ?? []);
@@ -72,9 +88,9 @@ export function ArticlePage() {
       <TopBar />
 
       <main className="mx-auto max-w-md px-4 pt-4 space-y-4">
-        <Link to="/" className="text-xs flex gap-1">
+        <button onClick={goBack} className="text-xs flex gap-1">
           <ArrowLeft className="h-3 w-3" /> Back
-        </Link>
+        </button>
 
         <h1 className="text-xl font-semibold">{item.title}</h1>
 
