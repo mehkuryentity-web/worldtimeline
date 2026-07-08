@@ -1,6 +1,6 @@
 export type Category =
   | "Top"
-  | "World"
+  | "Video"
   | "Politics"
   | "Business"
   | "Tech"
@@ -12,7 +12,7 @@ export type Category =
 
 export const CATEGORIES: Category[] = [
   "Top",
-  "World",
+  "Video",
   "Politics",
   "Business",
   "Tech",
