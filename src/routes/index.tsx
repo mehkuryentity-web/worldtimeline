@@ -113,7 +113,7 @@ function Home() {
     queryKey: ["news", country, category],
     // "Video" isn't a real news category -- that tab is video-only, so
     // there's no point spending an API call that would just come back empty.
-    enabled: category !== "Video",
+    enabled: category !== "Videos",
     queryFn: async () => {
       try {
         const res = await fetch(
@@ -300,7 +300,7 @@ function Home() {
     }
   });
 
-  // Leftover videos (including ALL of them when category === "Video", since
+  // Leftover videos (including ALL of them when category === "Videos", since
   // items is empty there): append in order rather than dropping them.
   while (videoIdx < sortedVideos.length) {
     const v = sortedVideos[videoIdx];
