@@ -13,6 +13,7 @@ import { Ticker } from "@/components/Ticker";
 
 import {
   type Category,
+  CATEGORIES,
   type NewsItem,
   cacheArticles,
 } from "@/lib/mock-news";
@@ -53,9 +54,16 @@ type Mode =
 function Home() {
   const { state, award, update } = useAppState();
 
-  const [category, setCategoryState] = useState<Category>(
-    () => (state.category as Category) ?? "Top"
-  );
+  const [category, setCategoryState] = useState<Category>(() => {
+    // Guards against stale localStorage from before a category was ever
+    // renamed/removed (e.g. the old "Video" -> "Videos" rename) -- an
+    // unrecognized persisted value silently fell through as neither a
+    // real category nor the video-only guard, leaking real articles into
+    // what should have been a pure video feed. Any value not currently in
+    // CATEGORIES falls back to "Top" instead of trusting it blindly.
+    const stored = state.category as Category | undefined;
+    return stored && CATEGORIES.includes(stored) ? stored : "Top";
+  });
 
   const [country, setCountryState] = useState<string>(
     () => state.country ?? "GLOBAL"
