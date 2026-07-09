@@ -324,19 +324,62 @@ function Home() {
     });
   }
 
-  // ---- PAGINATION (Load More) ----
-  // feedEntries above is the full, correctly-cadenced set already fetched;
-  // this just controls how much of it is actually rendered at once, and
-  // reveals more on demand instead of dumping everything in one shot.
+  // ---- INFINITE SCROLL (persisted across back-navigation) ----
+  // visibleCount is restored from persisted state on mount instead of
+  // always starting at PAGE_SIZE -- otherwise, going back from an article
+  // remounts Home with a freshly-short feed, and the correctly-restored
+  // scroll *pixel offset* lands the user somewhere totally different from
+  // where they actually were (this was the exact bug reported).
   const PAGE_SIZE = 12;
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [visibleCount, setVisibleCountState] = useState<number>(
+    () => state.feedVisibleCount ?? PAGE_SIZE
+  );
 
+  const setVisibleCount = (updater: (c: number) => number) => {
+    setVisibleCountState((prev) => {
+      const next = updater(prev);
+      update((s) => ({ ...s, feedVisibleCount: next }));
+      return next;
+    });
+  };
+
+  // Only reset to PAGE_SIZE on a REAL filter change during this mount's
+  // lifetime -- not on the initial mount itself, which would otherwise
+  // immediately wipe out the just-restored persisted count above.
+  const isFirstFilterRender = useRef(true);
   useEffect(() => {
-    setVisibleCount(PAGE_SIZE);
+    if (isFirstFilterRender.current) {
+      isFirstFilterRender.current = false;
+      return;
+    }
+    setVisibleCount(() => PAGE_SIZE);
   }, [country, category, mode]);
 
   const visibleEntries = feedEntries.slice(0, visibleCount);
   const hasMore = visibleCount < feedEntries.length;
+
+  // Sentinel div near the bottom of the rendered list -- IntersectionObserver
+  // reveals the next page automatically as it scrolls into view, instead of
+  // requiring a tap.
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!hasMore) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleCount((c) => Math.min(c + PAGE_SIZE, feedEntries.length));
+        }
+      },
+      { rootMargin: "600px" } // start loading before the user actually hits bottom
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, feedEntries.length]);
 
 
   // ---- BRIEFING INPUT: category-aware ----
@@ -442,12 +485,7 @@ function Home() {
         </div>
 
         {hasMore && (
-          <button
-            onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
-            className="w-full rounded-lg border border-border bg-surface-1 py-2.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition hover:border-primary/60 hover:text-foreground"
-          >
-            Load more
-          </button>
+          <div ref={sentinelRef} className="h-8 w-full" aria-hidden="true" />
         )}
       </main>
 
