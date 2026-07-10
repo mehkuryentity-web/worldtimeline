@@ -82,17 +82,29 @@ function Home() {
   const preloadedBatchesRef = useRef<Set<string>>(new Set());
   const touchStartX = useRef<number | null>(null);
 
+  const touchStartY = useRef<number | null>(null);
+
   const onTouchStart = (e: React.TouchEvent) => {
     touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
   };
 
   const onTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartX.current === null) return;
-    const delta = e.changedTouches[0].clientX - touchStartX.current;
+    if (touchStartX.current === null || touchStartY.current === null) return;
+    const deltaX = e.changedTouches[0].clientX - touchStartX.current;
+    const deltaY = e.changedTouches[0].clientY - touchStartY.current;
     touchStartX.current = null;
+    touchStartY.current = null;
+    // Must be a clear intentional horizontal swipe:
+    // - exceeds 80px horizontal travel (rules out taps entirely)
+    // - horizontal movement at least 2x vertical (rules out diagonal scrolls)
+    if (Math.abs(deltaX) < 80 || Math.abs(deltaX) < Math.abs(deltaY) * 2) return;
+    // Don't swipe if the touch ended inside an anchor or button (tap on a card link)
+    const target = e.target as HTMLElement;
+    if (target.closest("a, button")) return;
     const currentIndex = CATEGORIES.indexOf(category);
-    if (delta > 60) setCategory(CATEGORIES[Math.max(0, currentIndex - 1)]);
-    else if (delta < -60) setCategory(CATEGORIES[Math.min(CATEGORIES.length - 1, currentIndex + 1)]);
+    if (deltaX > 0) setCategory(CATEGORIES[Math.max(0, currentIndex - 1)]);
+    else setCategory(CATEGORIES[Math.min(CATEGORIES.length - 1, currentIndex + 1)]);
   };
   const countryMeta = findCountry(country);
 
