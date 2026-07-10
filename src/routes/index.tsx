@@ -80,6 +80,20 @@ function Home() {
   });
 
   const preloadedBatchesRef = useRef<Set<string>>(new Set());
+  const touchStartX = useRef<number | null>(null);
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+  };
+
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null) return;
+    const delta = e.changedTouches[0].clientX - touchStartX.current;
+    touchStartX.current = null;
+    const currentIndex = CATEGORIES.indexOf(category);
+    if (delta > 60) setCategory(CATEGORIES[Math.max(0, currentIndex - 1)]);
+    else if (delta < -60) setCategory(CATEGORIES[Math.min(CATEGORIES.length - 1, currentIndex + 1)]);
+  };
   const countryMeta = findCountry(country);
 
   const setCountry = (code: string) => {
@@ -468,7 +482,7 @@ function Home() {
           </div>
         )}
 
-        <div className="space-y-3">
+        <div className="space-y-3" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
           {visibleEntries.map((entry) => entry.node)}
         </div>
 
