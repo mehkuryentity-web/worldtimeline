@@ -9,11 +9,11 @@ const GUEST_ID_KEY = "wt:guest-id:v1";
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
 // Timing constants per animation style
-const STAGGER_MS = 90;       // blur / fade / slide — delay between words
-const DURATION_MS = 500;     // blur / fade / slide — each word's transition
-const TYPEWRITER_MS = 28;    // ms per character
-const MATRIX_CHAR_MS = 38;   // ms per character (matrix scramble)
-const MATRIX_PASSES = 6;     // scramble passes before settling
+const STAGGER_MS = 160;      // blur / fade / slide — delay between words (natural reading pace)
+const DURATION_MS = 600;     // blur / fade / slide — each word's transition
+const TYPEWRITER_MS = 28;    // ms per character (unchanged — already feels right)
+const MATRIX_CHAR_MS = 18;   // ms per character (faster scramble)
+const MATRIX_PASSES = 4;     // fewer passes = settles sooner
 
 export type BriefingAnimation = "blur" | "typewriter" | "fade" | "slide" | "matrix" | "none";
 
