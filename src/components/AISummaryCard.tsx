@@ -8,171 +8,86 @@ const CACHE_KEY_PREFIX = "wt:ai-briefing:v2:";
 const GUEST_ID_KEY = "wt:guest-id:v1";
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
-// Timing constants per animation style
-const STAGGER_MS = 160;      // blur / fade / slide — delay between words (natural reading pace)
-const DURATION_MS = 600;     // blur / fade / slide — each word's transition
-const TYPEWRITER_MS = 28;    // ms per character (unchanged — already feels right)
-const MATRIX_CHAR_MS = 18;   // ms per character (faster scramble)
-const MATRIX_PASSES = 4;     // fewer passes = settles sooner
+// Word-stagger animations: delay between each word starting its reveal
+const STAGGER_MS = 55;       // 55ms between words — smooth wave across ~200 words ≈ 11s total
+const DURATION_MS = 500;     // how long each word's own transition takes
+
+// Typewriter: ms per character
+const TYPEWRITER_MS = 22;
+
+// Matrix: total effect target ~3-4 seconds regardless of text length
+const MATRIX_TOTAL_MS = 3500;
+const MATRIX_TICK_MS = 40;   // repaint interval (25fps)
+const MATRIX_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&!?";
 
 export type BriefingAnimation = "blur" | "typewriter" | "fade" | "slide" | "matrix" | "none";
 
-interface CachedBriefing {
-  summary: string;
-  conclusion: string;
-  savedAt: number;
-}
-
-interface Props {
-  headlines: string[];
-  country: string;
-  category: string;
-  mode: string;
-}
+interface CachedBriefing { summary: string; conclusion: string; savedAt: number; }
+interface Props { headlines: string[]; country: string; category: string; mode: string; }
 
 /* ---- Cache helpers ---- */
-function cacheKeyFor(country: string, category: string, mode: string): string {
-  return `${CACHE_KEY_PREFIX}${country}|${category}|${mode}`;
-}
+function cacheKeyFor(c: string, cat: string, m: string) { return `${CACHE_KEY_PREFIX}${c}|${cat}|${m}`; }
 function getCache(key: string): CachedBriefing | null {
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as CachedBriefing;
-    if (Date.now() - parsed.savedAt > ONE_HOUR_MS) return null;
-    return parsed;
+    const p = JSON.parse(raw) as CachedBriefing;
+    return Date.now() - p.savedAt > ONE_HOUR_MS ? null : p;
   } catch { return null; }
 }
 function setCache(key: string, summary: string, conclusion: string) {
-  try {
-    localStorage.setItem(key, JSON.stringify({ summary, conclusion, savedAt: Date.now() }));
-  } catch {}
+  try { localStorage.setItem(key, JSON.stringify({ summary, conclusion, savedAt: Date.now() })); } catch {}
 }
 
-/* ---- Greeting ---- */
-function getGreeting(): string {
+/* ---- Greeting / guest ---- */
+function getGreeting() {
   const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 18) return "Good afternoon";
-  return "Good evening";
+  return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
 }
-
-/* ---- Guest ID ---- */
-function getOrCreateGuestId(): string {
+function getOrCreateGuestId() {
   try {
-    const existing = localStorage.getItem(GUEST_ID_KEY);
-    if (existing) return existing;
-    const fresh = `Guest_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-    localStorage.setItem(GUEST_ID_KEY, fresh);
-    return fresh;
+    const e = localStorage.getItem(GUEST_ID_KEY);
+    if (e) return e;
+    const f = `Guest_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+    localStorage.setItem(GUEST_ID_KEY, f);
+    return f;
   } catch { return "Guest_0000"; }
 }
-
-/* ---- Name resolution ---- */
 async function resolveDisplayName(): Promise<{ name: string; isGuest: boolean }> {
   try {
     const { data, error } = await supabase.auth.getUser();
     if (!error && data?.user) {
       const u = data.user;
-      const name =
-        (u.user_metadata as any)?.full_name ||
-        (u.user_metadata as any)?.name ||
-        (u.user_metadata as any)?.username ||
-        (u.email ? u.email.split("@")[0] : null) ||
-        "there";
+      const name = (u.user_metadata as any)?.full_name || (u.user_metadata as any)?.name ||
+        (u.user_metadata as any)?.username || (u.email ? u.email.split("@")[0] : null) || "there";
       return { name, isGuest: false };
     }
   } catch {}
   return { name: getOrCreateGuestId(), isGuest: true };
 }
 
-/* ---- Session cache: prevent replaying animation on back-nav ---- */
+/* ---- Session dedup ---- */
 const streamedThisSession = new Set<string>();
-
-function splitWords(text: string): string[] {
-  return text.match(/\S+\s*/g) || [];
-}
+function splitWords(text: string): string[] { return text.match(/\S+\s*/g) || []; }
 
 /* ============================================================
-   ANIMATION HOOKS
-   Each hook accepts the full text + a `go` flag (false = hold)
-   and returns whatever is needed for rendering.
+   TYPEWRITER HOOK
    ============================================================ */
-
-/** blur-to-focus: existing behaviour, unchanged */
-function useBlurAnim(words: string[], go: boolean) {
-  return { words, go };
-}
-
-/** typewriter: reveal characters one by one */
 function useTypewriterAnim(text: string, go: boolean) {
   const [displayed, setDisplayed] = useState("");
-  const rafRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
     if (!go) { setDisplayed(text); return; }
     setDisplayed("");
     let i = 0;
     function tick() {
       i++;
       setDisplayed(text.slice(0, i));
-      if (i < text.length) rafRef.current = setTimeout(tick, TYPEWRITER_MS);
+      if (i < text.length) timerRef.current = setTimeout(tick, TYPEWRITER_MS);
     }
-    rafRef.current = setTimeout(tick, TYPEWRITER_MS);
-    return () => { if (rafRef.current) clearTimeout(rafRef.current); };
-  }, [text, go]);
-
-  return displayed;
-}
-
-/** fade: words fade in sequentially — same structure as blur but different keyframe */
-function useFadeAnim(words: string[], go: boolean) {
-  return { words, go };
-}
-
-/** slide-up: words slide up from below */
-function useSlideAnim(words: string[], go: boolean) {
-  return { words, go };
-}
-
-/** matrix: characters scramble through random chars before settling */
-function useMatrixAnim(text: string, go: boolean) {
-  const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&";
-  const [displayed, setDisplayed] = useState("");
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (!go) { setDisplayed(text); return; }
-    setDisplayed("");
-    const chars = text.split("");
-    const settled = new Array(chars.length).fill(false);
-    let pass = 0;
-    const totalPasses = chars.length * MATRIX_PASSES;
-
-    function tick() {
-      pass++;
-      // Each pass settles approximately 1/MATRIX_PASSES of remaining chars
-      const newSettled = Math.floor(pass / MATRIX_PASSES);
-      for (let i = 0; i < newSettled && i < chars.length; i++) {
-        settled[i] = true;
-      }
-
-      const result = chars.map((ch, i) => {
-        if (settled[i] || ch === " ") return ch;
-        // Spaces and punctuation pass through immediately
-        if (/\s/.test(ch)) return ch;
-        return CHARS[Math.floor(Math.random() * CHARS.length)];
-      });
-
-      setDisplayed(result.join(""));
-      if (pass < totalPasses) {
-        timerRef.current = setTimeout(tick, MATRIX_CHAR_MS);
-      } else {
-        setDisplayed(text);
-      }
-    }
-
-    timerRef.current = setTimeout(tick, MATRIX_CHAR_MS);
+    timerRef.current = setTimeout(tick, TYPEWRITER_MS);
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [text, go]);
 
@@ -180,69 +95,103 @@ function useMatrixAnim(text: string, go: boolean) {
 }
 
 /* ============================================================
-   ANIMATED TEXT: renders both paragraphs with chosen effect
+   MATRIX HOOK
+   Fixed-duration approach: decide how many characters to settle
+   per tick based on total text length, so it always finishes in
+   ~MATRIX_TOTAL_MS regardless of text length.
+   ============================================================ */
+function useMatrixAnim(text: string, go: boolean) {
+  const [displayed, setDisplayed] = useState("");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (!go) { setDisplayed(text); return; }
+
+    const chars = text.split("");
+    const nonSpace = chars.filter(c => !/\s/.test(c)).length;
+    const totalTicks = Math.round(MATRIX_TOTAL_MS / MATRIX_TICK_MS); // ~87 ticks
+    // How many real chars to settle per tick (spread evenly)
+    const settlePerTick = Math.max(1, Math.ceil(nonSpace / totalTicks));
+
+    let settled = 0; // count of settled non-space chars
+    let tick = 0;
+
+    function frame() {
+      tick++;
+      // Settle the next batch
+      settled = Math.min(nonSpace, settled + settlePerTick);
+
+      let nonSpaceSeen = 0;
+      const result = chars.map((ch) => {
+        if (/\s/.test(ch)) return ch;
+        nonSpaceSeen++;
+        if (nonSpaceSeen <= settled) return ch; // already settled
+        return MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)];
+      });
+
+      setDisplayed(result.join(""));
+
+      if (settled < nonSpace) {
+        timerRef.current = setTimeout(frame, MATRIX_TICK_MS);
+      } else {
+        setDisplayed(text);
+      }
+    }
+
+    setDisplayed(chars.map(ch => /\s/.test(ch) ? ch : MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)]).join(""));
+    timerRef.current = setTimeout(frame, MATRIX_TICK_MS);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, [text, go]);
+
+  return displayed;
+}
+
+/* ============================================================
+   ANIMATED TEXT
+   Key insight: this component gets a `animKey` prop so React
+   fully unmounts+remounts it when new text arrives, guaranteeing
+   CSS animations restart from the beginning rather than being
+   skipped because the DOM nodes already existed.
    ============================================================ */
 function AnimatedText({
-  summary,
-  conclusion,
-  animStyle,
-  shouldAnimate,
+  summary, conclusion, animStyle, shouldAnimate, animKey,
 }: {
-  summary: string;
-  conclusion: string;
-  animStyle: BriefingAnimation;
-  shouldAnimate: boolean;
+  summary: string; conclusion: string;
+  animStyle: BriefingAnimation; shouldAnimate: boolean;
+  animKey: string;
 }) {
   const go = shouldAnimate && animStyle !== "none";
   const fullText = summary + (conclusion ? "\n\n" + conclusion : "");
 
-  // Typewriter and matrix operate on the full concatenated string,
-  // then we split back at the \n\n boundary for layout.
-  const twFull = useTypewriterAnim(
-    fullText,
-    go && animStyle === "typewriter"
-  );
-  const matFull = useMatrixAnim(
-    fullText,
-    go && animStyle === "matrix"
-  );
+  const twFull = useTypewriterAnim(fullText, go && animStyle === "typewriter");
+  const matFull = useMatrixAnim(fullText, go && animStyle === "matrix");
 
   const summaryWords = splitWords(summary);
   const conclusionWords = splitWords(conclusion);
   const summaryWordCount = summaryWords.length;
 
-  /* ---------- helpers ---------- */
   function wordSpans(
-    words: string[],
-    offset: number,
-    keyPrefix: string,
-    className: string,
-    extraStyle?: (i: number) => React.CSSProperties
+    words: string[], offset: number, keyPrefix: string,
+    cls: string, style: (i: number) => React.CSSProperties
   ) {
     return words.map((w, i) => (
-      <span
-        key={`${keyPrefix}-${i}`}
-        className={go ? className : undefined}
-        style={go && extraStyle ? extraStyle(offset + i) : undefined}
-      >
-        {w}
-      </span>
+      <span key={`${keyPrefix}-${i}`} className={go ? cls : undefined}
+        style={go ? style(offset + i) : undefined}>{w}</span>
     ));
   }
 
-  /* ---------- none / static ---------- */
+  /* none */
   if (animStyle === "none" || !shouldAnimate) {
     return (
       <div className="mt-2 space-y-3">
         <p className="text-sm leading-relaxed text-foreground">{summary}</p>
-        {conclusion && (
-          <p className="text-sm leading-relaxed text-foreground">{conclusion}</p>
-        )}
+        {conclusion && <p className="text-sm leading-relaxed text-foreground">{conclusion}</p>}
       </div>
     );
   }
 
-  /* ---------- typewriter ---------- */
+  /* typewriter */
   if (animStyle === "typewriter") {
     const [twSummary, twConclusion] = twFull.split("\n\n");
     return (
@@ -265,32 +214,26 @@ function AnimatedText({
     );
   }
 
-  /* ---------- matrix ---------- */
+  /* matrix */
   if (animStyle === "matrix") {
     const [matSummary, matConclusion] = matFull.split("\n\n");
     return (
-      <>
-        <div className="mt-2 space-y-3">
-          <p className="text-sm leading-relaxed text-foreground font-mono tracking-wide text-green-400">
-            {matSummary ?? ""}
+      <div className="mt-2 space-y-3">
+        <p className="text-sm leading-relaxed font-mono tracking-wide"
+          style={{ color: "var(--color-primary, #4ade80)" }}>
+          {matSummary ?? ""}
+        </p>
+        {conclusion && (
+          <p className="text-sm leading-relaxed font-mono tracking-wide"
+            style={{ color: "var(--color-primary, #4ade80)" }}>
+            {matConclusion ?? ""}
           </p>
-          {conclusion && (
-            <p className="text-sm leading-relaxed text-foreground font-mono tracking-wide text-green-400">
-              {matConclusion ?? ""}
-            </p>
-          )}
-        </div>
-        <style>{`
-          @keyframes wt-matrix-flicker {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.7; }
-          }
-        `}</style>
-      </>
+        )}
+      </div>
     );
   }
 
-  /* ---------- blur ---------- */
+  /* blur */
   if (animStyle === "blur") {
     return (
       <>
@@ -308,19 +251,19 @@ function AnimatedText({
         </div>
         <style>{`
           @keyframes wt-blur-in {
-            from { opacity: 0; filter: blur(6px); transform: translateY(2px); }
+            from { opacity: 0; filter: blur(8px); transform: translateY(3px); }
             to   { opacity: 1; filter: blur(0);   transform: translateY(0); }
           }
           .wt-blur-word {
-            display: inline-block; white-space: pre;
-            animation: wt-blur-in ${DURATION_MS}ms ease-out both;
+            display: inline-block; white-space: pre; opacity: 0;
+            animation: wt-blur-in ${DURATION_MS}ms ease-out forwards;
           }
         `}</style>
       </>
     );
   }
 
-  /* ---------- fade ---------- */
+  /* fade */
   if (animStyle === "fade") {
     return (
       <>
@@ -342,25 +285,25 @@ function AnimatedText({
             to   { opacity: 1; }
           }
           .wt-fade-word {
-            display: inline-block; white-space: pre;
-            animation: wt-fade-in ${DURATION_MS}ms ease-out both;
+            display: inline-block; white-space: pre; opacity: 0;
+            animation: wt-fade-in ${DURATION_MS}ms ease-out forwards;
           }
         `}</style>
       </>
     );
   }
 
-  /* ---------- slide-up ---------- */
+  /* slide */
   if (animStyle === "slide") {
     return (
       <>
         <div className="mt-2 space-y-3">
-          <p className="text-sm leading-relaxed text-foreground overflow-hidden">
+          <p className="text-sm leading-relaxed text-foreground" style={{ overflow: "hidden" }}>
             {wordSpans(summaryWords, 0, "s", "wt-slide-word",
               (i) => ({ animationDelay: `${i * STAGGER_MS}ms` }))}
           </p>
           {conclusionWords.length > 0 && (
-            <p className="text-sm leading-relaxed text-foreground overflow-hidden">
+            <p className="text-sm leading-relaxed text-foreground" style={{ overflow: "hidden" }}>
               {wordSpans(conclusionWords, summaryWordCount, "c", "wt-slide-word",
                 (i) => ({ animationDelay: `${i * STAGGER_MS}ms` }))}
             </p>
@@ -368,12 +311,12 @@ function AnimatedText({
         </div>
         <style>{`
           @keyframes wt-slide-up {
-            from { opacity: 0; transform: translateY(10px); }
+            from { opacity: 0; transform: translateY(12px); }
             to   { opacity: 1; transform: translateY(0); }
           }
           .wt-slide-word {
-            display: inline-block; white-space: pre;
-            animation: wt-slide-up ${DURATION_MS}ms ease-out both;
+            display: inline-block; white-space: pre; opacity: 0;
+            animation: wt-slide-up ${DURATION_MS}ms ease-out forwards;
           }
         `}</style>
       </>
@@ -388,8 +331,7 @@ function AnimatedText({
    ============================================================ */
 export function AISummaryCard({ headlines, country, category, mode }: Props) {
   const { state } = useAppState();
-  const animStyle: BriefingAnimation =
-    (state.briefingAnimation as BriefingAnimation) ?? "blur";
+  const animStyle: BriefingAnimation = (state.briefingAnimation as BriefingAnimation) ?? "blur";
 
   const [greetingName, setGreetingName] = useState("there");
   const [isGuest, setIsGuest] = useState(true);
@@ -397,6 +339,9 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
   const [conclusion, setConclusion] = useState("");
   const [status, setStatus] = useState<"loading" | "ready" | "empty">("loading");
   const [shouldAnimate, setShouldAnimate] = useState(true);
+  // Changes every time genuinely new text arrives — forces AnimatedText to remount
+  // so CSS animations always restart cleanly from frame 0.
+  const [animKey, setAnimKey] = useState(0);
 
   const firstRevealDoneRef = useRef(false);
 
@@ -422,6 +367,7 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
         if (anim !== null) setShouldAnimate(anim);
         setSummary(cached.summary);
         setConclusion(cached.conclusion);
+        setAnimKey((k) => k + 1);
         setStatus("ready");
       } else if (alive) {
         setStatus("loading");
@@ -441,6 +387,7 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
         setSummary(res.summary);
         setConclusion(res.conclusion || "");
         setCache(key, res.summary, res.conclusion || "");
+        setAnimKey((k) => k + 1);
         setStatus("ready");
       } else if (!cached) {
         setStatus("empty");
@@ -467,28 +414,25 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
           Preparing your briefing...
         </p>
       )}
-
       {status === "empty" && (
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
           No briefing available for this selection yet.
         </p>
       )}
-
       {status === "ready" && (
         <AnimatedText
+          key={animKey}
           summary={summary}
           conclusion={conclusion}
           animStyle={animStyle}
           shouldAnimate={shouldAnimate}
+          animKey={animKey}
         />
       )}
 
       {isGuest && (
-        <button
-          type="button"
-          onClick={() => { window.location.href = "/auth"; }}
-          className="mt-3 text-xs underline text-muted-foreground hover:text-foreground"
-        >
+        <button type="button" onClick={() => { window.location.href = "/auth"; }}
+          className="mt-3 text-xs underline text-muted-foreground hover:text-foreground">
           Sign in for a personalized briefing
         </button>
       )}
