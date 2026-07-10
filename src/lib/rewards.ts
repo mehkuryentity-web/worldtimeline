@@ -68,6 +68,7 @@ export interface AppState {
   customRangeHours?: string;
   customRangeMinutes?: string;
   feedVisibleCount?: number;
+  feedScrollY?: number;
 }
 
 const empty: AppState = {
