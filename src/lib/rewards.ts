@@ -69,6 +69,7 @@ export interface AppState {
   customRangeMinutes?: string;
   feedVisibleCount?: number;
   feedScrollY?: number;
+  briefingAnimation?: string;
 }
 
 const empty: AppState = {
