@@ -24,6 +24,7 @@ import { Loader2, Timer } from "lucide-react";
 
 import { fetchPreloadedSummaries } from "@/lib/news.functions";
 import { enqueueArticles } from "@/lib/intelligence/preloadEngine";
+import { getNews } from "@/lib/news";
 import { getVideos, formatViewCount, type VideoListing } from "@/lib/videos";
 
 export const Route = createFileRoute("/")({
@@ -119,26 +120,12 @@ function Home() {
 
   const { data, isLoading } = useQuery({
     queryKey: ["news", country, category],
-    // "Video" isn't a real news category -- that tab is video-only, so
+    // "Videos" isn't a real news category -- that tab is video-only, so
     // there's no point spending an API call that would just come back empty.
     enabled: category !== "Videos",
     queryFn: async () => {
-      try {
-        const res = await fetch(
-          `/api/news?category=${encodeURIComponent(category)}&country=${encodeURIComponent(country)}`
-        );
-
-        if (!res.ok) {
-          console.warn("News API failed:", res.status);
-          return { items: [] };
-        }
-
-        const json = await res.json();
-        return json ?? { items: [] };
-      } catch (e) {
-        console.warn("News fetch crashed:", e);
-        return { items: [] };
-      }
+      const items = await getNews(category, country);
+      return { items };
     },
     retry: false,
     staleTime: 5 * 60 * 1000,
