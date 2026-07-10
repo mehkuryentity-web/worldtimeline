@@ -30,6 +30,7 @@ function ProfilePage() {
   const totalReactions = Object.values(state.articles).filter((a) => a.reaction).length;
 
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [briefingAnimOpen, setBriefingAnimOpen] = useState(false);
   const [earnPointsOpen, setEarnPointsOpen] = useState(false);
   const [recentActivityOpen, setRecentActivityOpen] = useState(false);
   const [feedbackCategory, setFeedbackCategory] = useState<FeedbackCategory>("idea");
@@ -317,48 +318,58 @@ function ProfilePage() {
         </section>
         {/* AI Briefing Animation */}
         <section className="overflow-hidden rounded-xl border border-border bg-surface-1">
-          <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
-            <Sparkles className="h-3.5 w-3.5 text-primary" />
-            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-              AI Briefing Style
-            </span>
-          </div>
-          <div className="p-4 space-y-2">
-            <p className="text-xs text-muted-foreground mb-3">
-              Choose how the AI briefing text appears when it loads.
-            </p>
-            {(
-              [
-                { value: "blur",       label: "Focus Blur",   desc: "Words sharpen into view" },
-                { value: "typewriter", label: "Typewriter",   desc: "Characters type out one by one" },
-                { value: "fade",       label: "Fade In",      desc: "Words fade in sequentially" },
-                { value: "slide",      label: "Slide Up",     desc: "Words rise up into place" },
-                { value: "matrix",     label: "Matrix",       desc: "Characters scramble before settling" },
-                { value: "none",       label: "Instant",      desc: "Text appears all at once" },
-              ] as { value: BriefingAnimation; label: string; desc: string }[]
-            ).map(({ value, label, desc }) => {
-              const active = (state.briefingAnimation ?? "blur") === value;
-              return (
-                <button
-                  key={value}
-                  onClick={() => update((s) => ({ ...s, briefingAnimation: value }))}
-                  className={`w-full flex items-center justify-between rounded-lg border px-3 py-2.5 text-left transition ${
-                    active
-                      ? "border-primary bg-primary/10"
-                      : "border-border bg-surface-2 hover:border-primary/40"
-                  }`}
-                >
-                  <div>
-                    <div className={`text-sm font-medium ${active ? "text-primary" : "text-foreground"}`}>
-                      {label}
+          <button
+            onClick={() => setBriefingAnimOpen((v) => !v)}
+            className="flex w-full items-center justify-between px-4 py-3"
+          >
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-3.5 w-3.5 text-primary" />
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                AI Briefing Style
+              </span>
+            </div>
+            {briefingAnimOpen ? (
+              <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+            )}
+          </button>
+
+          {briefingAnimOpen && (
+            <div className="border-t border-border p-4 space-y-2">
+              {(
+                [
+                  { value: "blur",       label: "Focus Blur",   desc: "Words sharpen into view" },
+                  { value: "typewriter", label: "Typewriter",   desc: "Characters type out one by one" },
+                  { value: "fade",       label: "Fade In",      desc: "Words fade in sequentially" },
+                  { value: "slide",      label: "Slide Up",     desc: "Words rise up into place" },
+                  { value: "matrix",     label: "Matrix",       desc: "Characters scramble before settling" },
+                  { value: "none",       label: "Instant",      desc: "Text appears all at once" },
+                ] as { value: BriefingAnimation; label: string; desc: string }[]
+              ).map(({ value, label, desc }) => {
+                const active = (state.briefingAnimation ?? "blur") === value;
+                return (
+                  <button
+                    key={value}
+                    onClick={() => update((s) => ({ ...s, briefingAnimation: value }))}
+                    className={`w-full flex items-center justify-between rounded-lg border px-3 py-2.5 text-left transition ${
+                      active
+                        ? "border-primary bg-primary/10"
+                        : "border-border bg-surface-2 hover:border-primary/40"
+                    }`}
+                  >
+                    <div>
+                      <div className={`text-sm font-medium ${active ? "text-primary" : "text-foreground"}`}>
+                        {label}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">{desc}</div>
                     </div>
-                    <div className="text-[11px] text-muted-foreground">{desc}</div>
-                  </div>
-                  {active && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
-                </button>
-              );
-            })}
-          </div>
+                    {active && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </section>
 
       </main>
