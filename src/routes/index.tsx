@@ -395,6 +395,54 @@ function Home() {
   }, [hasMore, feedEntries.length]);
 
 
+  // ---- SCROLL POSITION: save on scroll, restore on mount ----
+  // We throttle saves to every ~200ms so we're not hammering localStorage
+  // on every pixel of movement.
+  const scrollSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const onScroll = () => {
+      if (scrollSaveTimer.current) clearTimeout(scrollSaveTimer.current);
+      scrollSaveTimer.current = setTimeout(() => {
+        update((s) => ({ ...s, feedScrollY: window.scrollY }));
+      }, 200);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (scrollSaveTimer.current) clearTimeout(scrollSaveTimer.current);
+    };
+  }, []);
+
+  // Restore scroll position after the feed has painted.
+  // We wait for visibleCount cards to actually be in the DOM before
+  // jumping -- otherwise the page is too short and the restore silently
+  // clamps to 0. A double-rAF gives the browser one full paint cycle.
+  const scrollRestored = useRef(false);
+  useEffect(() => {
+    if (scrollRestored.current) return;
+    const target = state.feedScrollY;
+    if (!target || target < 10) return;
+    scrollRestored.current = true;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: target, behavior: "instant" });
+      });
+    });
+  }, [visibleEntries.length]);
+
+  // Clear saved scroll when the user actively changes a filter
+  // (they're starting a fresh browse, not returning from an article).
+  const isFirstFilterChange = useRef(true);
+  useEffect(() => {
+    if (isFirstFilterChange.current) {
+      isFirstFilterChange.current = false;
+      return;
+    }
+    scrollRestored.current = false;
+    update((s) => ({ ...s, feedScrollY: 0 }));
+  }, [country, category, mode]);
+
   // ---- BRIEFING INPUT: category-aware ----
   // Videos tab has no articles to summarize (items is empty there by
   // design), so feed the briefing top 5 videos' title/channel/view-count
