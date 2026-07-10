@@ -454,6 +454,7 @@ function Home() {
           </div>
         </div>
 
+
         <CategoryTabs value={category} onChange={setCategory} />
 
         <h2 className="text-[10px] uppercase text-muted-foreground">
