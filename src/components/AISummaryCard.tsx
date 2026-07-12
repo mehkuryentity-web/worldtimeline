@@ -102,11 +102,13 @@ function useTypewriterAnim(text: string, go: boolean) {
    ============================================================ */
 function useMatrixAnim(text: string, go: boolean) {
   const [displayed, setDisplayed] = useState("");
+  const [done, setDone] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
-    if (!go) { setDisplayed(text); return; }
+    setDone(false);
+    if (!go) { setDisplayed(text); setDone(true); return; }
 
     const chars = text.split("");
     const nonSpace = chars.filter(c => !/\s/.test(c)).length;
@@ -136,6 +138,7 @@ function useMatrixAnim(text: string, go: boolean) {
         timerRef.current = setTimeout(frame, MATRIX_TICK_MS);
       } else {
         setDisplayed(text);
+        setDone(true);
       }
     }
 
@@ -144,7 +147,7 @@ function useMatrixAnim(text: string, go: boolean) {
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [text, go]);
 
-  return displayed;
+  return { text: displayed, done };
 }
 
 /* ============================================================
@@ -165,7 +168,9 @@ function AnimatedText({
   const fullText = summary + (conclusion ? "\n\n" + conclusion : "");
 
   const twFull = useTypewriterAnim(fullText, go && animStyle === "typewriter");
-  const matFull = useMatrixAnim(fullText, go && animStyle === "matrix");
+  const matResult = useMatrixAnim(fullText, go && animStyle === "matrix");
+  const matFull = matResult.text;
+  const matDone = matResult.done;
 
   const summaryWords = splitWords(summary);
   const conclusionWords = splitWords(conclusion);
@@ -217,15 +222,17 @@ function AnimatedText({
   /* matrix */
   if (animStyle === "matrix") {
     const [matSummary, matConclusion] = matFull.split("\n\n");
+    const matrixCls = matDone
+      ? "text-sm leading-relaxed text-foreground"
+      : "text-sm leading-relaxed font-mono tracking-wide";
+    const matrixStyle = matDone ? undefined : { color: "#00ff41" };
     return (
       <div className="mt-2 space-y-3">
-        <p className="text-sm leading-relaxed font-mono tracking-wide"
-          style={{ color: "var(--color-primary, #4ade80)" }}>
+        <p className={matrixCls} style={matrixStyle}>
           {matSummary ?? ""}
         </p>
         {conclusion && (
-          <p className="text-sm leading-relaxed font-mono tracking-wide"
-            style={{ color: "var(--color-primary, #4ade80)" }}>
+          <p className={matrixCls} style={matrixStyle}>
             {matConclusion ?? ""}
           </p>
         )}
@@ -331,7 +338,7 @@ function AnimatedText({
    ============================================================ */
 export function AISummaryCard({ headlines, country, category, mode }: Props) {
   const { state } = useAppState();
-  const animStyle: BriefingAnimation = (state.briefingAnimation as BriefingAnimation) ?? "blur";
+  const animStyle: BriefingAnimation = (state.briefingAnimation as BriefingAnimation) ?? "matrix";
 
   const [greetingName, setGreetingName] = useState("there");
   const [isGuest, setIsGuest] = useState(true);
