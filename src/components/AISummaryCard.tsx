@@ -350,11 +350,7 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
   // so CSS animations always restart cleanly from frame 0.
   const [animKey, setAnimKey] = useState(0);
 
-  const firstRevealDoneRef = useRef(false);
-
-  function decideAnimate(s: string, c: string): boolean | null {
-    if (firstRevealDoneRef.current) return null;
-    firstRevealDoneRef.current = true;
+  function decideAnimate(s: string, c: string): boolean {
     const key = `${s}\u0000${c}`;
     if (streamedThisSession.has(key)) return false;
     streamedThisSession.add(key);
@@ -363,15 +359,13 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
 
   useEffect(() => {
     let alive = true;
-    firstRevealDoneRef.current = false;
 
     async function load() {
       const key = cacheKeyFor(country, category, mode);
       const cached = getCache(key);
 
       if (cached && alive) {
-        const anim = decideAnimate(cached.summary, cached.conclusion);
-        if (anim !== null) setShouldAnimate(anim);
+        setShouldAnimate(decideAnimate(cached.summary, cached.conclusion));
         setSummary(cached.summary);
         setConclusion(cached.conclusion);
         setAnimKey((k) => k + 1);
@@ -389,8 +383,7 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
       if (!alive) return;
 
       if (typeof res?.summary === "string" && res.summary.trim().length > 0) {
-        const anim = decideAnimate(res.summary, res.conclusion || "");
-        if (anim !== null) setShouldAnimate(anim);
+        setShouldAnimate(decideAnimate(res.summary, res.conclusion || ""));
         setSummary(res.summary);
         setConclusion(res.conclusion || "");
         setCache(key, res.summary, res.conclusion || "");
