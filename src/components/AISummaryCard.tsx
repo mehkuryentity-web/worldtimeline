@@ -16,8 +16,8 @@ const DURATION_MS = 500;     // how long each word's own transition takes
 const TYPEWRITER_MS = 22;
 
 // Matrix: total effect target ~3-4 seconds regardless of text length
-const MATRIX_TOTAL_MS = 3500;
-const MATRIX_TICK_MS = 40;   // repaint interval (25fps)
+const MATRIX_TOTAL_MS = 6000;
+const MATRIX_TICK_MS = 60;   // repaint interval (~16fps, slower and more dramatic)
 const MATRIX_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&!?";
 
 export type BriefingAnimation = "blur" | "typewriter" | "fade" | "slide" | "matrix" | "none";
@@ -225,7 +225,7 @@ function AnimatedText({
     const matrixCls = matDone
       ? "text-sm leading-relaxed text-foreground"
       : "text-sm leading-relaxed font-mono tracking-wide";
-    const matrixStyle = matDone ? undefined : { color: "#00ff41" };
+    const matrixStyle = matDone ? undefined : { color: "#ffffff" };
     return (
       <div className="mt-2 space-y-3">
         <p className={matrixCls} style={matrixStyle}>
