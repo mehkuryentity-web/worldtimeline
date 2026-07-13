@@ -1,5 +1,5 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { createFileRoute, useNavigate, useRouterState } from "@tanstack/react-router";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   Briefcase,
   GraduationCap,
@@ -56,16 +56,39 @@ type SectionId = "internships" | "scholarships" | "grants";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const SUPABASE_URL = "https://fadiusjtmtemxvysodie.supabase.co";
-
-const SECTIONS = [
-  { id: "internships" as SectionId, label: "Internships", icon: GraduationCap, emoji: "🎓" },
-  { id: "scholarships" as SectionId, label: "Scholarships", icon: BookOpen, emoji: "📚" },
-  { id: "grants" as SectionId, label: "Grants", icon: Coins, emoji: "💰" },
-] as const;
-
+const SESSION_KEY = "xplore_session";
 const SAVED_KEY = "xplore_saved";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+const INLINE_SECTIONS = [
+  { id: "internships" as SectionId, label: "Internships", icon: GraduationCap },
+  { id: "scholarships" as SectionId, label: "Scholarships", icon: BookOpen },
+  { id: "grants" as SectionId, label: "Grants", icon: Coins },
+] as const;
+
+// ─── Session persistence ──────────────────────────────────────────────────────
+
+interface XploreSession {
+  activeTab: SectionId;
+  scrollPositions: Record<SectionId, number>;
+}
+
+function readSession(): XploreSession {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) throw new Error();
+    return JSON.parse(raw);
+  } catch {
+    return { activeTab: "internships", scrollPositions: { internships: 0, scholarships: 0, grants: 0 } };
+  }
+}
+
+function writeSession(session: XploreSession) {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  } catch {}
+}
+
+// ─── Saved items ──────────────────────────────────────────────────────────────
 
 function getSaved(): Record<string, XploreItem> {
   try {
@@ -76,11 +99,15 @@ function getSaved(): Record<string, XploreItem> {
   }
 }
 
-function setSaved(data: Record<string, XploreItem>) {
-  try {
-    localStorage.setItem(SAVED_KEY, JSON.stringify(data));
-  } catch {}
+function toggleSavedItem(item: XploreItem): Record<string, XploreItem> {
+  const current = getSaved();
+  if (current[item.id]) delete current[item.id];
+  else current[item.id] = item;
+  try { localStorage.setItem(SAVED_KEY, JSON.stringify(current)); } catch {}
+  return current;
 }
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function timeAgo(iso: string | null): string {
   if (!iso) return "";
@@ -96,8 +123,7 @@ function timeAgo(iso: string | null): string {
 function formatDeadline(deadline: string | null, rolling: boolean): { text: string; urgent: boolean } {
   if (rolling || !deadline) return { text: "Rolling deadline", urgent: false };
   const d = new Date(deadline);
-  const now = new Date();
-  const diff = Math.ceil((d.getTime() - now.getTime()) / 86400_000);
+  const diff = Math.ceil((d.getTime() - Date.now()) / 86400_000);
   if (diff < 0) return { text: "Closed", urgent: true };
   if (diff === 0) return { text: "Closes today!", urgent: true };
   if (diff <= 3) return { text: `Closes in ${diff} day${diff === 1 ? "" : "s"}`, urgent: true };
@@ -118,7 +144,7 @@ async function fetchSection(type: SectionId, page = 1): Promise<XploreResponse> 
   return res.json();
 }
 
-// ─── Item Card ────────────────────────────────────────────────────────────────
+// ─── Card ─────────────────────────────────────────────────────────────────────
 
 function XploreCard({
   item,
@@ -144,7 +170,7 @@ function XploreCard({
     if (item.amount && item.currency)
       chips.push(`${item.currency} ${item.amount.toLocaleString()}`);
     if (item.country) chips.push(item.country);
-  } else if (section === "internships") {
+  } else {
     if (item.company) chips.push(item.company);
     if (item.remote) chips.push("Remote");
     else if (item.country) chips.push(item.country);
@@ -153,7 +179,6 @@ function XploreCard({
 
   return (
     <div className="rounded-xl border border-border bg-surface-1 p-4 space-y-2.5">
-      {/* Title row */}
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm font-semibold leading-snug flex-1 line-clamp-2">{item.title}</p>
         <button
@@ -161,20 +186,16 @@ function XploreCard({
           className="flex-shrink-0 text-muted-foreground hover:text-primary transition mt-0.5"
           aria-label={saved ? "Unsave" : "Save"}
         >
-          {saved ? (
-            <BookmarkCheck className="h-4 w-4 text-primary" />
-          ) : (
-            <Bookmark className="h-4 w-4" />
-          )}
+          {saved
+            ? <BookmarkCheck className="h-4 w-4 text-primary" />
+            : <Bookmark className="h-4 w-4" />}
         </button>
       </div>
 
-      {/* Description */}
       {item.description && (
         <p className="text-xs text-muted-foreground line-clamp-2">{item.description}</p>
       )}
 
-      {/* Chips */}
       {chips.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {chips.slice(0, 3).map((c) => (
@@ -188,15 +209,10 @@ function XploreCard({
         </div>
       )}
 
-      {/* Footer */}
       <div className="flex items-center justify-between gap-2 pt-0.5">
         <div className="flex items-center gap-1.5">
           <Clock className={`h-3 w-3 ${urgent ? "text-destructive" : "text-muted-foreground"}`} />
-          <span
-            className={`font-mono text-[9px] uppercase tracking-wider ${
-              urgent ? "text-destructive" : "text-muted-foreground"
-            }`}
-          >
+          <span className={`font-mono text-[9px] uppercase tracking-wider ${urgent ? "text-destructive" : "text-muted-foreground"}`}>
             {deadlineText}
           </span>
         </div>
@@ -212,7 +228,6 @@ function XploreCard({
         )}
       </div>
 
-      {/* Source */}
       <p className="font-mono text-[8px] uppercase tracking-wider text-muted-foreground/60">
         via {item.source} · {timeAgo(item.fetched_at)}
       </p>
@@ -222,7 +237,15 @@ function XploreCard({
 
 // ─── Section panel ────────────────────────────────────────────────────────────
 
-function SectionPanel({ section }: { section: SectionId }) {
+function SectionPanel({
+  section,
+  scrollRef,
+  onScroll,
+}: {
+  section: SectionId;
+  scrollRef: React.RefObject<HTMLDivElement>;
+  onScroll: (y: number) => void;
+}) {
   const [items, setItems] = useState<XploreItem[] | null>(null);
   const [sources, setSources] = useState<XploreResponse["sources"]>([]);
   const [loading, setLoading] = useState(false);
@@ -230,130 +253,133 @@ function SectionPanel({ section }: { section: SectionId }) {
   const [showSources, setShowSources] = useState(false);
   const [saved, setSaved] = useState<Record<string, XploreItem>>(getSaved);
   const loaded = useRef(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    if (loaded.current) return;
-    loaded.current = true;
+  const load = useCallback(() => {
     setLoading(true);
+    setError(null);
     fetchSection(section)
-      .then((data) => {
-        setItems(data.items);
-        setSources(data.sources);
-      })
+      .then((data) => { setItems(data.items); setSources(data.sources); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [section]);
 
-  const handleSave = (item: XploreItem) => {
-    setSaved((prev) => {
-      const next = { ...prev };
-      if (next[item.id]) delete next[item.id];
-      else next[item.id] = item;
-      setSaved(next);
-      return next;
-    });
-    // persist immediately
-    const current = getSaved();
-    if (current[item.id]) {
-      delete current[item.id];
-    } else {
-      current[item.id] = item;
+  useEffect(() => {
+    if (loaded.current) return;
+    loaded.current = true;
+    load();
+  }, [load]);
+
+  // Restore scroll after items render
+  useEffect(() => {
+    if (!items || !scrollRef.current) return;
+    const session = readSession();
+    const saved = session.scrollPositions[section] ?? 0;
+    if (saved > 0) {
+      // slight delay to let DOM paint
+      setTimeout(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = saved;
+      }, 50);
     }
-    setSaved(current);
+  }, [items, section, scrollRef]);
+
+  const handleScroll = () => {
+    if (!scrollRef.current) return;
+    const y = scrollRef.current.scrollTop;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => onScroll(y), 300);
+  };
+
+  const handleSave = (item: XploreItem) => {
+    setSaved(toggleSavedItem(item));
   };
 
   const errCount = sources.filter((s) => s.count === 0).length;
 
   return (
-    <div className="space-y-3">
-      {/* Source status bar */}
-      {sources.length > 0 && (
-        <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-          <RefreshCw className="h-3 w-3" />
-          {items ? `${items.length} listings` : "Loading..."}
-          {errCount > 0 && (
+    <div
+      ref={scrollRef}
+      className="flex-1 overflow-y-auto px-4 pb-6"
+      onScroll={handleScroll}
+    >
+      <div className="space-y-3 pt-3">
+        {/* Source status */}
+        {sources.length > 0 && (
+          <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            <RefreshCw className="h-3 w-3" />
+            {items ? `${items.length} listings` : "Loading..."}
+            {errCount > 0 && (
+              <button
+                onClick={() => setShowSources((v) => !v)}
+                className="ml-1 flex items-center gap-1 text-amber-500"
+              >
+                <AlertTriangle className="h-3 w-3" />
+                {errCount} source{errCount > 1 ? "s" : ""} empty
+              </button>
+            )}
+          </div>
+        )}
+
+        {showSources && (
+          <div className="rounded-md border border-border bg-surface-1 p-2 space-y-1">
+            {sources.map((s) => (
+              <div key={s.source} className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider">
+                <span className="text-muted-foreground">{s.label}</span>
+                <span className={s.count === 0 ? "text-amber-500" : "text-muted-foreground"}>
+                  {s.count} · {timeAgo(s.lastFetchedAt)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Skeletons */}
+        {loading && (
+          <div className="space-y-3">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="h-32 rounded-xl bg-surface-1 border border-border animate-pulse" />
+            ))}
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div className="rounded-xl border border-dashed border-destructive/40 bg-surface-1 p-6 text-center">
+            <p className="text-sm text-muted-foreground">Failed to load. Check your connection.</p>
             <button
-              onClick={() => setShowSources((v) => !v)}
-              className="ml-1 flex items-center gap-1 text-amber-500"
+              onClick={() => { loaded.current = false; load(); }}
+              className="mt-3 font-mono text-xs uppercase tracking-wider text-primary"
             >
-              <AlertTriangle className="h-3 w-3" />
-              {errCount} source{errCount > 1 ? "s" : ""} empty
+              Retry →
             </button>
-          )}
-        </div>
-      )}
+          </div>
+        )}
 
-      {showSources && (
-        <div className="rounded-md border border-border bg-surface-1 p-2 space-y-1">
-          {sources.map((s) => (
-            <div
-              key={s.source}
-              className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider"
-            >
-              <span className="text-muted-foreground">{s.label}</span>
-              <span className={s.count === 0 ? "text-amber-500" : "text-muted-foreground"}>
-                {s.count} listings · {timeAgo(s.lastFetchedAt)}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
+        {/* Empty */}
+        {!loading && !error && items?.length === 0 && (
+          <div className="rounded-xl border border-dashed border-border bg-surface-1 p-8 text-center">
+            <Globe className="mx-auto h-8 w-8 text-muted-foreground mb-3" />
+            <p className="text-sm text-muted-foreground">
+              No {section} available right now. Check back soon.
+            </p>
+          </div>
+        )}
 
-      {/* Loading skeletons */}
-      {loading && (
-        <div className="space-y-3">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-32 rounded-xl bg-surface-1 border border-border animate-pulse" />
-          ))}
-        </div>
-      )}
-
-      {/* Error */}
-      {error && (
-        <div className="rounded-xl border border-dashed border-destructive/40 bg-surface-1 p-6 text-center">
-          <p className="text-sm text-muted-foreground">Failed to load. Check your connection.</p>
-          <button
-            onClick={() => {
-              loaded.current = false;
-              setError(null);
-              setItems(null);
-              setLoading(true);
-              fetchSection(section)
-                .then((d) => { setItems(d.items); setSources(d.sources); })
-                .catch((e) => setError(e.message))
-                .finally(() => setLoading(false));
-            }}
-            className="mt-3 font-mono text-xs uppercase tracking-wider text-primary"
-          >
-            Retry →
-          </button>
-        </div>
-      )}
-
-      {/* Empty */}
-      {!loading && !error && items?.length === 0 && (
-        <div className="rounded-xl border border-dashed border-border bg-surface-1 p-8 text-center">
-          <Globe className="mx-auto h-8 w-8 text-muted-foreground mb-3" />
-          <p className="text-sm text-muted-foreground">
-            No {section} available right now. Check back soon.
-          </p>
-        </div>
-      )}
-
-      {/* Items */}
-      {items && items.length > 0 && (
-        <div className="space-y-2">
-          {items.map((item) => (
-            <XploreCard
-              key={item.id}
-              item={item}
-              section={section}
-              saved={!!saved[item.id]}
-              onSave={handleSave}
-            />
-          ))}
-        </div>
-      )}
+        {/* Items */}
+        {items && items.length > 0 && (
+          <div className="space-y-2">
+            {items.map((item) => (
+              <XploreCard
+                key={item.id}
+                item={item}
+                section={section}
+                saved={!!saved[item.id]}
+                onSave={handleSave}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -362,29 +388,68 @@ function SectionPanel({ section }: { section: SectionId }) {
 
 function XplorePage() {
   const navigate = useNavigate();
-  const [activeSection, setActiveSection] = useState<SectionId>("internships");
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  // Restore session on mount
+  const session = useRef<XploreSession>(readSession());
+  const [activeSection, setActiveSection] = useState<SectionId>(session.current.activeTab);
+
+  // One scroll ref per section — keeps position when switching tabs
+  const scrollRefs: Record<SectionId, React.RefObject<HTMLDivElement>> = {
+    internships: useRef<HTMLDivElement>(null),
+    scholarships: useRef<HTMLDivElement>(null),
+    grants: useRef<HTMLDivElement>(null),
+  };
+
   const touchStartX = useRef<number | null>(null);
 
-  const onTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX;
-  };
+  // Save scroll position for a section
+  const handleScroll = useCallback((section: SectionId, y: number) => {
+    session.current = {
+      ...session.current,
+      scrollPositions: { ...session.current.scrollPositions, [section]: y },
+    };
+    writeSession(session.current);
+  }, []);
+
+  // Switch inline tab — save current scroll first
+  const switchTab = useCallback((next: SectionId) => {
+    // capture scroll of current tab before switching
+    const currentRef = scrollRefs[activeSection].current;
+    if (currentRef) {
+      const y = currentRef.scrollTop;
+      session.current = {
+        ...session.current,
+        scrollPositions: { ...session.current.scrollPositions, [activeSection]: y },
+      };
+    }
+    session.current = { ...session.current, activeTab: next };
+    writeSession(session.current);
+    setActiveSection(next);
+  }, [activeSection, scrollRefs]);
+
+  // Swipe between inline tabs
+  const onTouchStart = (e: React.TouchEvent) => { touchStartX.current = e.touches[0].clientX; };
   const onTouchEnd = (e: React.TouchEvent) => {
     if (touchStartX.current === null) return;
     const delta = e.changedTouches[0].clientX - touchStartX.current;
     touchStartX.current = null;
-    const idx = SECTIONS.findIndex((s) => s.id === activeSection);
-    if (delta > 60 && idx > 0) setActiveSection(SECTIONS[idx - 1].id);
-    if (delta < -60 && idx < SECTIONS.length - 1) setActiveSection(SECTIONS[idx + 1].id);
+    if (Math.abs(delta) < 60) return;
+    const idx = INLINE_SECTIONS.findIndex((s) => s.id === activeSection);
+    if (delta > 0 && idx > 0) switchTab(INLINE_SECTIONS[idx - 1].id);
+    if (delta < 0 && idx < INLINE_SECTIONS.length - 1) switchTab(INLINE_SECTIONS[idx + 1].id);
   };
 
-  return (
-    <div className="min-h-screen bg-background pb-28">
-      <TopBar />
-      <main className="mx-auto max-w-md px-4 pt-4 space-y-4">
+  const isJobsActive = pathname === "/jobs";
 
-        {/* Header */}
-        <section className="rounded-xl border border-border bg-surface-1 p-4">
-          <div className="flex items-center justify-between">
+  return (
+    <div className="flex flex-col min-h-screen bg-background">
+      <TopBar />
+
+      <div className="mx-auto w-full max-w-md flex flex-col flex-1 overflow-hidden pb-20">
+        {/* Page header */}
+        <div className="px-4 pt-4 pb-2 flex-shrink-0">
+          <section className="rounded-xl border border-border bg-surface-1 p-4">
             <div className="flex items-center gap-2">
               <span className="rounded-sm bg-primary px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-primary-foreground">
                 🧭
@@ -393,42 +458,71 @@ function XplorePage() {
                 Xplore
               </span>
             </div>
-            {/* Jobs shortcut */}
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              Opportunities worldwide — updated every few hours.
+            </p>
+          </section>
+        </div>
+
+        {/* Four-tab bar */}
+        <div className="px-4 pb-3 flex-shrink-0">
+          <div className="flex rounded-md border border-border bg-surface-1 p-1">
+            {/* Jobs tab — navigates to /jobs */}
             <button
               onClick={() => navigate({ to: "/jobs" })}
-              className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition"
-            >
-              <Briefcase className="h-3 w-3" /> Jobs
-            </button>
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground">
-            Opportunities worldwide — internships, scholarships, and grants updated every few hours.
-          </p>
-        </section>
-
-        {/* Tab bar */}
-        <div className="flex rounded-md border border-border bg-surface-1 p-1">
-          {SECTIONS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => setActiveSection(id)}
               className={`flex flex-1 items-center justify-center gap-1.5 rounded-sm py-2 font-mono text-[10px] uppercase tracking-wider transition ${
-                activeSection === id
+                isJobsActive
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground"
               }`}
             >
-              <Icon className="h-3 w-3" />
-              {label}
+              <Briefcase className="h-3 w-3" />
+              Jobs
             </button>
-          ))}
+
+            {/* Inline section tabs */}
+            {INLINE_SECTIONS.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => switchTab(id)}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-sm py-2 font-mono text-[10px] uppercase tracking-wider transition ${
+                  !isJobsActive && activeSection === id
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground"
+                }`}
+              >
+                <Icon className="h-3 w-3" />
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* Content — swipeable */}
-        <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-          <SectionPanel key={activeSection} section={activeSection} />
+        {/* Swipeable content area */}
+        <div
+          className="flex-1 overflow-hidden relative"
+          onTouchStart={onTouchStart}
+          onTouchEnd={onTouchEnd}
+        >
+          {INLINE_SECTIONS.map(({ id }) => (
+            <div
+              key={id}
+              className={`absolute inset-0 transition-opacity duration-150 ${
+                activeSection === id && !isJobsActive
+                  ? "opacity-100 pointer-events-auto"
+                  : "opacity-0 pointer-events-none"
+              }`}
+            >
+              <SectionPanel
+                section={id}
+                scrollRef={scrollRefs[id]}
+                onScroll={(y) => handleScroll(id, y)}
+              />
+            </div>
+          ))}
         </div>
-      </main>
+      </div>
+
       <BottomNav />
     </div>
   );
