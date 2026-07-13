@@ -1,13 +1,13 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Home, Flame, Plus, Briefcase, User } from "lucide-react";
+import { Home, Flame, Plus, Compass, User } from "lucide-react";
 
 export function BottomNav() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const items: { to: "/" | "/trending" | "/submit" | "/jobs" | "/profile"; label: string; icon: typeof Home; primary?: boolean }[] = [
+  const items: { to: "/" | "/trending" | "/submit" | "/xplore" | "/profile"; label: string; icon: typeof Home; primary?: boolean }[] = [
     { to: "/", label: "Home", icon: Home },
     { to: "/trending", label: "Trending", icon: Flame },
     { to: "/submit", label: "Add", icon: Plus, primary: true },
-    { to: "/jobs", label: "Jobs", icon: Briefcase },
+    { to: "/xplore", label: "Xplore", icon: Compass },
     { to: "/profile", label: "Profile", icon: User },
   ];
 
@@ -15,7 +15,7 @@ export function BottomNav() {
     <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-surface-1/95 backdrop-blur supports-[backdrop-filter]:bg-surface-1/80">
       <div className="mx-auto flex max-w-md items-stretch justify-around px-2 pb-[max(env(safe-area-inset-bottom),0.5rem)] pt-2">
         {items.map(({ to, label, icon: Icon, primary }) => {
-          const active = pathname === to;
+          const active = pathname === to || (to === "/xplore" && pathname === "/jobs");
           if (primary) {
             return (
               <Link
