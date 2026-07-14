@@ -239,10 +239,12 @@ function XploreCard({
 
 function SectionPanel({
   section,
+  isActive,
   scrollRef,
   onScroll,
 }: {
   section: SectionId;
+  isActive: boolean;
   scrollRef: React.RefObject<HTMLDivElement>;
   onScroll: (y: number) => void;
 }) {
@@ -254,10 +256,13 @@ function SectionPanel({
   const [saved, setSaved] = useState<Record<string, XploreItem>>(getSaved);
   const loaded = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // track whether we've restored scroll for the current items load
+  const scrollRestored = useRef(false);
 
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
+    scrollRestored.current = false;
     fetchSection(section)
       .then((data) => { setItems(data.items); setSources(data.sources); })
       .catch((e) => setError(e.message))
@@ -270,18 +275,21 @@ function SectionPanel({
     load();
   }, [load]);
 
-  // Restore scroll after items render
+  // Restore scroll once items are painted AND panel is active
   useEffect(() => {
-    if (!items || !scrollRef.current) return;
-    const session = readSession();
-    const saved = session.scrollPositions[section] ?? 0;
-    if (saved > 0) {
-      // slight delay to let DOM paint
+    if (!items || scrollRestored.current) return;
+    if (!isActive) return; // wait until this panel is actually visible
+    if (!scrollRef.current) return;
+    const pos = readSession().scrollPositions[section] ?? 0;
+    if (pos > 0) {
       setTimeout(() => {
-        if (scrollRef.current) scrollRef.current.scrollTop = saved;
-      }, 50);
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = pos;
+        }
+      }, 60);
     }
-  }, [items, section, scrollRef]);
+    scrollRestored.current = true;
+  }, [items, isActive, section, scrollRef]);
 
   const handleScroll = () => {
     if (!scrollRef.current) return;
@@ -299,7 +307,7 @@ function SectionPanel({
   return (
     <div
       ref={scrollRef}
-      className="flex-1 overflow-y-auto px-4 pb-6"
+      className="absolute inset-0 overflow-y-auto px-4 pb-6"
       onScroll={handleScroll}
     >
       <div className="space-y-3 pt-3">
@@ -390,11 +398,9 @@ function XplorePage() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
-  // Restore session on mount
   const session = useRef<XploreSession>(readSession());
   const [activeSection, setActiveSection] = useState<SectionId>(session.current.activeTab);
 
-  // One scroll ref per section — keeps position when switching tabs
   const scrollRefs: Record<SectionId, React.RefObject<HTMLDivElement>> = {
     internships: useRef<HTMLDivElement>(null),
     scholarships: useRef<HTMLDivElement>(null),
@@ -402,8 +408,8 @@ function XplorePage() {
   };
 
   const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
 
-  // Save scroll position for a section
   const handleScroll = useCallback((section: SectionId, y: number) => {
     session.current = {
       ...session.current,
@@ -412,9 +418,8 @@ function XplorePage() {
     writeSession(session.current);
   }, []);
 
-  // Switch inline tab — save current scroll first
   const switchTab = useCallback((next: SectionId) => {
-    // capture scroll of current tab before switching
+    // Save current scroll before switching
     const currentRef = scrollRefs[activeSection].current;
     if (currentRef) {
       const y = currentRef.scrollTop;
@@ -428,16 +433,23 @@ function XplorePage() {
     setActiveSection(next);
   }, [activeSection, scrollRefs]);
 
-  // Swipe between inline tabs
-  const onTouchStart = (e: React.TouchEvent) => { touchStartX.current = e.touches[0].clientX; };
+  // Swipe — only fire if horizontal movement dominates (guard against vertical scroll)
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
   const onTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartX.current === null) return;
-    const delta = e.changedTouches[0].clientX - touchStartX.current;
+    if (touchStartX.current === null || touchStartY.current === null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    const dy = e.changedTouches[0].clientY - touchStartY.current;
     touchStartX.current = null;
-    if (Math.abs(delta) < 60) return;
+    touchStartY.current = null;
+    // Ignore if vertical movement is larger — user is scrolling, not swiping
+    if (Math.abs(dy) > Math.abs(dx)) return;
+    if (Math.abs(dx) < 60) return;
     const idx = INLINE_SECTIONS.findIndex((s) => s.id === activeSection);
-    if (delta > 0 && idx > 0) switchTab(INLINE_SECTIONS[idx - 1].id);
-    if (delta < 0 && idx < INLINE_SECTIONS.length - 1) switchTab(INLINE_SECTIONS[idx + 1].id);
+    if (dx > 0 && idx > 0) switchTab(INLINE_SECTIONS[idx - 1].id);
+    if (dx < 0 && idx < INLINE_SECTIONS.length - 1) switchTab(INLINE_SECTIONS[idx + 1].id);
   };
 
   const isJobsActive = pathname === "/jobs";
@@ -498,28 +510,36 @@ function XplorePage() {
           </div>
         </div>
 
-        {/* Swipeable content area */}
+        {/* Panel container — translateX instead of opacity so hidden panels are truly off-screen */}
         <div
-          className="flex-1 overflow-hidden relative"
+          className="flex-1 relative overflow-hidden"
           onTouchStart={onTouchStart}
           onTouchEnd={onTouchEnd}
         >
-          {INLINE_SECTIONS.map(({ id }) => (
-            <div
-              key={id}
-              className={`absolute inset-0 transition-opacity duration-150 ${
-                activeSection === id && !isJobsActive
-                  ? "opacity-100 pointer-events-auto"
-                  : "opacity-0 pointer-events-none"
-              }`}
-            >
-              <SectionPanel
-                section={id}
-                scrollRef={scrollRefs[id]}
-                onScroll={(y) => handleScroll(id, y)}
-              />
-            </div>
-          ))}
+          {INLINE_SECTIONS.map(({ id }, idx) => {
+            const activeIdx = INLINE_SECTIONS.findIndex((s) => s.id === activeSection);
+            const offset = (idx - activeIdx) * 100;
+            return (
+              <div
+                key={id}
+                style={{
+                  transform: `translateX(${offset}%)`,
+                  transition: "transform 200ms ease",
+                  position: "absolute",
+                  inset: 0,
+                  // only the active panel is interactive
+                  pointerEvents: activeSection === id ? "auto" : "none",
+                }}
+              >
+                <SectionPanel
+                  section={id}
+                  isActive={activeSection === id}
+                  scrollRef={scrollRefs[id]}
+                  onScroll={(y) => handleScroll(id, y)}
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
 
