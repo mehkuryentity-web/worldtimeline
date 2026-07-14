@@ -55,7 +55,6 @@ interface XploreResponse {
 }
 
 type PanelId = "jobs" | "internships" | "scholarships" | "grants";
-type JobTab = "browse" | "matches" | "post";
 type JobTypeFilter = JobType | "All";
 type Recency = "all" | "24h" | "7d" | "30d";
 
@@ -383,13 +382,94 @@ function PostModal({ activePanel, userId, onClose, onPosted }: {
   );
 }
 
-// ─── Xplore Card ─────────────────────────────────────────────────────────────
+// ─── Xplore Card (with full engagement) ──────────────────────────────────────
 
-function XploreCard({ item, section, saved, onSave, match }: {
+function XploreCard({ item, section, saved, onSave, match, userId }: {
   item: XploreItem; section: Exclude<PanelId, "jobs">; saved: boolean;
   onSave: (item: XploreItem) => void; match?: XploreMatch | null;
+  userId: string | null;
 }) {
+  const navigate = useNavigate();
   const { text: deadlineText, urgent } = formatDeadline(item.deadline, item.rolling);
+
+  // Engagement state
+  const [counts, setCounts] = useState<EngagementCounts>({ interestedCount: 0, viewCount: 0, commentCount: 0 });
+  const [interested, setInterested] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [comments, setComments] = useState<JobComment[]>([]);
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [replyTo, setReplyTo] = useState<string | null>(null);
+  const [shared, setShared] = useState(false);
+  const [reported, setReported] = useState(false);
+  const viewRecorded = useRef(false);
+  const engagementLoaded = useRef(false);
+
+  useEffect(() => {
+    if (engagementLoaded.current) return;
+    engagementLoaded.current = true;
+    getEngagementCounts([item.id]).then((map) => {
+      if (map[item.id]) setCounts(map[item.id]);
+    });
+    if (userId) {
+      getMyReactions([item.id], userId).then((set) => setInterested(set.has(item.id)));
+    }
+  }, [item.id, userId]);
+
+  useEffect(() => {
+    if (!userId || viewRecorded.current) return;
+    viewRecorded.current = true;
+    recordView(item.id, userId).then(() => {
+      setCounts((prev) => ({ ...prev, viewCount: prev.viewCount + 1 }));
+    });
+  }, [item.id, userId]);
+
+  const requireAuth = () => navigate({ to: "/auth" });
+
+  const handleInterested = () => {
+    if (!userId) return requireAuth();
+    const next = !interested;
+    setInterested(next);
+    setCounts((prev) => ({ ...prev, interestedCount: prev.interestedCount + (next ? 1 : -1) }));
+    toggleInterested(item.id, userId, interested);
+  };
+
+  const loadComments = async () => {
+    setLoadingComments(true);
+    setComments(await getComments(item.id));
+    setLoadingComments(false);
+  };
+
+  const toggleComments = () => {
+    const next = !commentsOpen;
+    setCommentsOpen(next);
+    if (next && comments.length === 0) loadComments();
+  };
+
+  const submitComment = async () => {
+    if (!userId) return requireAuth();
+    const text = draft.trim();
+    if (!text) return;
+    await addComment(item.id, userId, text, replyTo);
+    setDraft(""); setReplyTo(null);
+    setCounts((prev) => ({ ...prev, commentCount: prev.commentCount + 1 }));
+    loadComments();
+  };
+
+  const handleShare = async () => {
+    try {
+      if (item.url && navigator.share) await navigator.share({ title: item.title, url: item.url });
+      else if (item.url) { await navigator.clipboard.writeText(item.url); setShared(true); setTimeout(() => setShared(false), 1500); }
+    } catch {}
+  };
+
+  const handleReport = async () => {
+    if (!userId) return requireAuth();
+    if (reported) return;
+    setReported(true);
+    await reportJob(item.id, userId, "flagged_by_user");
+  };
+
   const chips: string[] = [];
   if (section === "scholarships") {
     if (item.level) chips.push(item.level);
@@ -407,19 +487,29 @@ function XploreCard({ item, section, saved, onSave, match }: {
     if (item.duration) chips.push(item.duration);
   }
 
+  const topLevel = comments.filter((c) => !c.parentId);
+  const repliesOf = (id: string) => comments.filter((c) => c.parentId === id);
+
   return (
     <div className="rounded-xl border border-border bg-surface-1 p-4 space-y-2.5">
+      {/* Title + save */}
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm font-semibold leading-snug flex-1 line-clamp-2">{item.title}</p>
-        <button onClick={() => onSave(item)} className="flex-shrink-0 text-muted-foreground hover:text-primary transition mt-0.5">
-          {saved ? <BookmarkCheck className="h-4 w-4 text-primary" /> : <Bookmark className="h-4 w-4" />}
-        </button>
+        <div className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
+          <span className="flex items-center gap-0.5 font-mono text-[9px] text-muted-foreground">
+            <Eye className="h-3 w-3" />{counts.viewCount}
+          </span>
+          <button onClick={() => onSave(item)} className="text-muted-foreground hover:text-primary transition">
+            {saved ? <BookmarkCheck className="h-4 w-4 text-primary" /> : <Bookmark className="h-4 w-4" />}
+          </button>
+        </div>
       </div>
 
+      {/* Match badge */}
       {match && (
         <div className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs ${match.score === "strong" ? "bg-accent/10 text-accent" : "bg-surface-2 text-muted-foreground"}`}>
           <Sparkles className="h-3.5 w-3.5 shrink-0" />
-          <span><strong>{match.score === "strong" ? "Strong match" : "Possible match"}</strong> · matches your interest in {match.matchedInterest}</span>
+          <span><strong>{match.score === "strong" ? "Strong match" : "Possible match"}</strong> · {match.matchedInterest}</span>
         </div>
       )}
 
@@ -433,7 +523,8 @@ function XploreCard({ item, section, saved, onSave, match }: {
         </div>
       )}
 
-      <div className="flex items-center justify-between gap-2 pt-0.5">
+      {/* Deadline + View button */}
+      <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
           <Clock className={`h-3 w-3 ${urgent ? "text-destructive" : "text-muted-foreground"}`} />
           <span className={`font-mono text-[9px] uppercase tracking-wider ${urgent ? "text-destructive" : "text-muted-foreground"}`}>{deadlineText}</span>
@@ -445,6 +536,71 @@ function XploreCard({ item, section, saved, onSave, match }: {
           </a>
         )}
       </div>
+
+      {/* Engagement row */}
+      <div className="flex items-center justify-between border-t border-border pt-2">
+        <button onClick={handleInterested}
+          className={`flex items-center gap-1 rounded-md px-2 py-1 font-mono text-[10px] uppercase tracking-wider transition ${interested ? "text-accent" : "text-muted-foreground hover:text-accent"}`}>
+          <Flame className={`h-3.5 w-3.5 ${interested ? "fill-accent" : ""}`} />
+          {counts.interestedCount > 0 ? counts.interestedCount : "Interested"}
+        </button>
+        <button onClick={toggleComments}
+          className="flex items-center gap-1 rounded-md px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground">
+          <MessageCircle className="h-3.5 w-3.5" />
+          {counts.commentCount > 0 ? counts.commentCount : "Comment"}
+        </button>
+        <button onClick={handleShare}
+          className="flex items-center gap-1 rounded-md px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground">
+          <Share2 className="h-3.5 w-3.5" />{shared ? "Copied" : "Share"}
+        </button>
+        <button onClick={handleReport} disabled={reported}
+          className="flex items-center gap-1 rounded-md px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-destructive disabled:opacity-50">
+          <Flag className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      {/* Comments */}
+      {commentsOpen && (
+        <div className="space-y-2 border-t border-border pt-2">
+          {loadingComments ? (
+            <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Loading...</p>
+          ) : topLevel.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No comments yet.</p>
+          ) : topLevel.map((cm) => (
+            <div key={cm.id} className="space-y-1.5">
+              <div className="rounded-md bg-surface-2 px-2.5 py-2 text-xs">
+                <p>{cm.content}</p>
+                <div className="mt-1 flex items-center gap-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+                  <span>{timeAgo(cm.createdAt)}</span>
+                  <button onClick={() => setReplyTo(cm.id)} className="hover:text-primary">Reply</button>
+                </div>
+              </div>
+              {repliesOf(cm.id).map((r) => (
+                <div key={r.id} className="ml-4 flex items-start gap-1.5">
+                  <CornerDownRight className="mt-2 h-3 w-3 shrink-0 text-muted-foreground" />
+                  <div className="flex-1 rounded-md bg-surface-2 px-2.5 py-2 text-xs">
+                    <p>{r.content}</p>
+                    <span className="mt-1 block font-mono text-[9px] uppercase tracking-wider text-muted-foreground">{timeAgo(r.createdAt)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+          <div className="flex items-center gap-1.5 pt-1">
+            {replyTo && <button onClick={() => setReplyTo(null)} className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-primary">Replying ×</button>}
+            <input value={draft} onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submitComment()}
+              placeholder={userId ? "Add a comment..." : "Sign in to comment"}
+              disabled={!userId}
+              className="flex-1 rounded-md border border-border bg-surface-1 px-2.5 py-1.5 text-xs focus:border-primary focus:outline-none disabled:opacity-50" />
+            <button onClick={submitComment} disabled={!draft.trim()}
+              className="rounded-md bg-primary p-1.5 text-primary-foreground disabled:opacity-50">
+              <Send className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       <p className="font-mono text-[8px] uppercase tracking-wider text-muted-foreground/60">via {item.source} · {timeAgo(item.fetched_at)}</p>
     </div>
   );
@@ -626,7 +782,6 @@ function JobsPanel({ scrollRef, isActive, onScroll, userId, interests, onOpenInt
   userId: string | null; interests: string[]; onOpenInterests: () => void;
 }) {
   const { update: updateAppState, state: appState } = useAppState();
-  const [jobTab, setJobTab] = useState<JobTab>("browse");
   const [jobs, setJobs] = useState<JobListing[]>([]);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [sources, setSources] = useState<SourceStatus[]>([]);
@@ -674,9 +829,7 @@ function JobsPanel({ scrollRef, isActive, onScroll, userId, interests, onOpenInt
     syncMatches(userId, matches);
   }, [jobs, interests, userId]);
 
-  useEffect(() => {
-    if (jobTab === "matches" && userId) markMatchesSeen(userId);
-  }, [jobTab, userId]);
+
 
   useEffect(() => {
     if (!isActive || scrollRestored.current || !scrollRef.current) return;
@@ -729,21 +882,7 @@ function JobsPanel({ scrollRef, isActive, onScroll, userId, interests, onOpenInt
   return (
     <div ref={scrollRef} className="absolute inset-0 overflow-y-auto" onScroll={handleScroll}>
       <div className="px-4 pt-3 pb-6 space-y-3">
-        {/* Sub-tabs */}
-        <div className="flex rounded-md border border-border bg-surface-1 p-1">
-          {(["browse", "matches", "post"] as JobTab[]).map((t) => {
-            const icons = { browse: Briefcase, matches: Target, post: Plus };
-            const Icon = icons[t];
-            return (
-              <button key={t} onClick={() => setJobTab(t)}
-                className={`flex flex-1 items-center justify-center gap-1.5 rounded-sm py-2 font-mono text-[10px] uppercase tracking-wider transition ${jobTab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
-                <Icon className="h-3 w-3" />{t}
-              </button>
-            );
-          })}
-        </div>
-
-        {jobTab === "browse" && (
+        {true && (
           <>
             {/* Search */}
             <div className="relative">
@@ -824,52 +963,7 @@ function JobsPanel({ scrollRef, isActive, onScroll, userId, interests, onOpenInt
           </>
         )}
 
-        {jobTab === "matches" && (
-          <div className="space-y-3">
-            {!userId ? (
-              <div className="rounded-xl border border-border bg-surface-1 p-6 text-center">
-                <p className="text-sm text-muted-foreground">Sign in to get matched.</p>
-              </div>
-            ) : (
-              <>
-                <div className="rounded-xl border border-border bg-surface-1 p-4">
-                  <div className="flex items-center justify-between">
-                    <h2 className="flex items-center gap-1.5 text-sm font-semibold"><Target className="h-4 w-4 text-primary" /> Your interests</h2>
-                    <button onClick={onOpenInterests} className="font-mono text-[10px] uppercase tracking-wider text-primary underline">Edit</button>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">Matched across all Xplore categories.</p>
-                  {interests.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {interests.map((i) => <span key={i} className="rounded-full bg-accent/20 px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-accent">{i}</span>)}
-                    </div>
-                  )}
-                </div>
-                {interests.length === 0 ? (
-                  <button onClick={onOpenInterests} className="w-full rounded-md bg-primary py-2.5 font-mono text-xs uppercase tracking-wider text-primary-foreground">Set your interests</button>
-                ) : matchedJobs.length === 0 ? (
-                  <div className="rounded-md border border-dashed border-border bg-surface-1 p-6 text-center">
-                    <p className="text-sm text-muted-foreground">No job matches yet. Check back after next sync.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {matchedJobs.map((m) => (
-                      <InlineJobCard key={m.job.id} job={m.job} userId={userId} counts={engagementMap[m.job.id]}
-                        interested={myReactions.has(m.job.id)} isSaved={!!appState.saved?.[m.job.id]} match={m}
-                        onCountsChange={handleCountsChange} onInterestedChange={handleInterestedChange} onToggleSave={handleToggleSave} />
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
 
-        {jobTab === "post" && (
-          <div className="rounded-xl border border-border bg-surface-1 p-6 text-center">
-            <Plus className="mx-auto h-8 w-8 text-muted-foreground mb-3" />
-            <p className="text-sm text-muted-foreground mb-3">Use the + icon in the header to post a job or opportunity.</p>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -877,10 +971,10 @@ function JobsPanel({ scrollRef, isActive, onScroll, userId, interests, onOpenInt
 
 // ─── Xplore Section Panel ─────────────────────────────────────────────────────
 
-function XploreSectionPanel({ section, isActive, scrollRef, onScroll, interests, query, filtersOpen }: {
+function XploreSectionPanel({ section, isActive, scrollRef, onScroll, interests, query, userId }: {
   section: Exclude<PanelId, "jobs">; isActive: boolean;
   scrollRef: React.RefObject<HTMLDivElement>; onScroll: (y: number) => void;
-  interests: string[]; query: string; filtersOpen: boolean;
+  interests: string[]; query: string; userId: string | null;
 }) {
   const [items, setItems] = useState<XploreItem[] | null>(null);
   const [sources, setSources] = useState<XploreResponse["sources"]>([]);
@@ -977,7 +1071,8 @@ function XploreSectionPanel({ section, isActive, scrollRef, onScroll, interests,
           <div className="space-y-2">
             {filteredItems.map((item) => (
               <XploreCard key={item.id} item={item} section={section} saved={!!saved[item.id]}
-                onSave={(i) => setSaved(toggleSavedItem(i))} match={xploreMatches.get(item.id) ?? null} />
+                onSave={(i) => setSaved(toggleSavedItem(i))} match={xploreMatches.get(item.id) ?? null}
+                userId={userId} />
             ))}
           </div>
         )}
@@ -1073,15 +1168,18 @@ function XplorePage() {
       <TopBar />
 
       <div className="mx-auto w-full max-w-md flex flex-col flex-1 overflow-hidden pb-20">
-        {/* Xplore Header + Search — hides on scroll down, shows on scroll up */}
+        {/* Header + Search + Tab bar — all move together on scroll */}
         <div
           ref={headerRef}
           style={{
             transform: headerShown ? "translateY(0)" : "translateY(-110%)",
             transition: "transform 220ms ease",
+            position: "relative",
+            zIndex: 10,
           }}
           className="flex-shrink-0 bg-background"
         >
+          {/* Xplore branding row */}
           <div className="px-4 pt-4 pb-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -1102,7 +1200,7 @@ function XplorePage() {
             <p className="mt-1.5 text-xs text-muted-foreground">Jobs, internships, scholarships & grants — updated every few hours.</p>
           </div>
 
-          {/* Global search bar */}
+          {/* Global search */}
           <div className="px-4 pb-2">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -1111,27 +1209,27 @@ function XplorePage() {
                 className="w-full rounded-md border border-border bg-surface-1 py-2 pl-9 pr-3 text-sm focus:border-primary focus:outline-none" />
             </div>
           </div>
-        </div>
 
-        {/* Panel tab bar — always pinned, horizontally scrollable */}
-        <div className="flex-shrink-0 px-4 pb-3 bg-background">
-          <div
-            ref={tabBarRef}
-            className="flex overflow-x-auto no-scrollbar rounded-md border border-border bg-surface-1 p-1 gap-1"
-          >
-            {PANELS.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                ref={(el) => { if (el) tabRefs.current[id] = el; }}
-                onClick={() => switchPanel(id)}
-                className={`flex flex-shrink-0 items-center justify-center gap-1.5 rounded-sm px-4 py-2 font-mono text-[10px] uppercase tracking-wider transition whitespace-nowrap ${
-                  activePanel === id ? "bg-primary text-primary-foreground" : "text-muted-foreground"
-                }`}
-              >
-                <Icon className="h-3 w-3 flex-shrink-0" />
-                {label}
-              </button>
-            ))}
+          {/* Panel tab bar — horizontally scrollable, no overlap */}
+          <div className="px-4 pb-3">
+            <div
+              ref={tabBarRef}
+              className="flex overflow-x-auto no-scrollbar rounded-md border border-border bg-surface-1 p-1 gap-1"
+            >
+              {PANELS.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  ref={(el) => { if (el) tabRefs.current[id] = el; }}
+                  onClick={() => switchPanel(id)}
+                  className={`flex flex-shrink-0 items-center justify-center gap-1.5 rounded-sm px-4 py-2 font-mono text-[10px] uppercase tracking-wider transition whitespace-nowrap ${
+                    activePanel === id ? "bg-primary text-primary-foreground" : "text-muted-foreground"
+                  }`}
+                >
+                  <Icon className="h-3 w-3 flex-shrink-0" />
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -1149,7 +1247,7 @@ function XplorePage() {
                 ) : (
                   <XploreSectionPanel section={id} isActive={activePanel === id}
                     scrollRef={scrollRefs[id]} onScroll={(y) => handleScroll(id, y)}
-                    interests={interests} query={globalQuery} filtersOpen={filtersOpen} />
+                    interests={interests} query={globalQuery} userId={userId} />
                 )}
               </div>
             );
