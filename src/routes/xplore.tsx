@@ -1008,6 +1008,12 @@ function XplorePage() {
 
   const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
+  const tabBarRef = useRef<HTMLDivElement>(null);
+  const tabRefs = useRef<Partial<Record<PanelId, HTMLButtonElement>>>({});
+  const headerRef = useRef<HTMLDivElement>(null);
+  const lastScrollY = useRef(0);
+  const headerVisible = useRef(true);
+  const [headerShown, setHeaderShown] = useState(true);
 
   useEffect(() => {
     getCurrentUserId().then((uid) => {
@@ -1019,6 +1025,17 @@ function XplorePage() {
   const handleScroll = useCallback((panel: PanelId, y: number) => {
     session.current = { ...session.current, scrollPositions: { ...session.current.scrollPositions, [panel]: y } };
     writeSession(session.current);
+
+    // Hide header on scroll down, show on scroll up
+    const delta = y - lastScrollY.current;
+    lastScrollY.current = y;
+    if (delta > 4 && headerVisible.current && y > 60) {
+      headerVisible.current = false;
+      setHeaderShown(false);
+    } else if (delta < -4 && !headerVisible.current) {
+      headerVisible.current = true;
+      setHeaderShown(true);
+    }
   }, []);
 
   const switchPanel = useCallback((next: PanelId) => {
@@ -1029,6 +1046,11 @@ function XplorePage() {
     session.current = { ...session.current, activePanel: next };
     writeSession(session.current);
     setActivePanel(next);
+    // Auto-scroll active tab into centre view
+    setTimeout(() => {
+      const btn = tabRefs.current[next];
+      if (btn) btn.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    }, 50);
   }, [activePanel, scrollRefs]);
 
   const onTouchStart = (e: React.TouchEvent) => {
@@ -1051,45 +1073,63 @@ function XplorePage() {
       <TopBar />
 
       <div className="mx-auto w-full max-w-md flex flex-col flex-1 overflow-hidden pb-20">
-        {/* Xplore Header — always visible */}
-        <div className="px-4 pt-4 pb-2 flex-shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="rounded-sm bg-primary px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-primary-foreground">🧭</span>
-              <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Xplore</span>
+        {/* Xplore Header + Search — hides on scroll down, shows on scroll up */}
+        <div
+          ref={headerRef}
+          style={{
+            transform: headerShown ? "translateY(0)" : "translateY(-110%)",
+            transition: "transform 220ms ease",
+          }}
+          className="flex-shrink-0 bg-background"
+        >
+          <div className="px-4 pt-4 pb-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="rounded-sm bg-primary px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-primary-foreground">🧭</span>
+                <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Xplore</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => { if (!userId) navigate({ to: "/auth" }); else setShowInterests(true); }}
+                  className="flex items-center gap-1 rounded-full border border-border px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-primary hover:border-primary transition">
+                  <Target className="h-3 w-3" /> Matches
+                </button>
+                <button onClick={() => setShowPost(true)}
+                  className="flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-primary-foreground">
+                  <Plus className="h-3 w-3" /> Post
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => { if (!userId) navigate({ to: "/auth" }); else setShowInterests(true); }}
-                className="flex items-center gap-1 rounded-full border border-border px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-primary hover:border-primary transition">
-                <Target className="h-3 w-3" /> Matches
-              </button>
-              <button onClick={() => setShowPost(true)}
-                className="flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-primary-foreground">
-                <Plus className="h-3 w-3" /> Post
-              </button>
+            <p className="mt-1.5 text-xs text-muted-foreground">Jobs, internships, scholarships & grants — updated every few hours.</p>
+          </div>
+
+          {/* Global search bar */}
+          <div className="px-4 pb-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input value={globalQuery} onChange={(e) => setGlobalQuery(e.target.value)}
+                placeholder={`Search ${activePanel}...`}
+                className="w-full rounded-md border border-border bg-surface-1 py-2 pl-9 pr-3 text-sm focus:border-primary focus:outline-none" />
             </div>
           </div>
-          <p className="mt-1.5 text-xs text-muted-foreground">Jobs, internships, scholarships & grants — updated every few hours.</p>
         </div>
 
-        {/* Global search bar */}
-        <div className="px-4 pb-2 flex-shrink-0">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input value={globalQuery} onChange={(e) => setGlobalQuery(e.target.value)}
-              placeholder={`Search ${activePanel}...`}
-              className="w-full rounded-md border border-border bg-surface-1 py-2 pl-9 pr-3 text-sm focus:border-primary focus:outline-none" />
-          </div>
-        </div>
-
-        {/* Panel tab bar */}
-        <div className="px-4 pb-3 flex-shrink-0">
-          <div className="flex rounded-md border border-border bg-surface-1 p-1 gap-0.5">
+        {/* Panel tab bar — always pinned, horizontally scrollable */}
+        <div className="flex-shrink-0 px-4 pb-3 bg-background">
+          <div
+            ref={tabBarRef}
+            className="flex overflow-x-auto no-scrollbar rounded-md border border-border bg-surface-1 p-1 gap-1"
+          >
             {PANELS.map(({ id, label, icon: Icon }) => (
-              <button key={id} onClick={() => switchPanel(id)}
-                className={`flex flex-1 items-center justify-center gap-1 rounded-sm py-2 font-mono text-[9px] uppercase tracking-wider transition ${activePanel === id ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
+              <button
+                key={id}
+                ref={(el) => { if (el) tabRefs.current[id] = el; }}
+                onClick={() => switchPanel(id)}
+                className={`flex flex-shrink-0 items-center justify-center gap-1.5 rounded-sm px-4 py-2 font-mono text-[10px] uppercase tracking-wider transition whitespace-nowrap ${
+                  activePanel === id ? "bg-primary text-primary-foreground" : "text-muted-foreground"
+                }`}
+              >
                 <Icon className="h-3 w-3 flex-shrink-0" />
-                <span className="hidden xs:inline">{label}</span>
+                {label}
               </button>
             ))}
           </div>
