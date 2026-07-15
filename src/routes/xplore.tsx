@@ -4,21 +4,23 @@ import {
   GraduationCap, BookOpen, Coins, Briefcase,
   RefreshCw, AlertTriangle, Clock, Globe, ExternalLink,
   Bookmark, BookmarkCheck, Search, SlidersHorizontal,
-  ChevronDown, ChevronUp, MapPin, Target, Send, Check,
+  MapPin, Target, Send, Check,
   Sparkles, Building2, Eye, Flame, MessageCircle, Share2,
-  Flag, CornerDownRight, Plus, X,
+  Flag, CornerDownRight, Plus, X, Heart,
 } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
 import { useAppState } from "@/hooks/use-app-state";
 import { getJobs, postJob, timeAgo as jobTimeAgo } from "@/lib/jobs";
 import type { JobListing, JobType, SourceStatus } from "@/lib/jobs";
-import { getCurrentUserId, getEngagementCounts, getMyReactions, recordView, toggleInterested, addComment, getComments, reportJob } from "@/lib/job-engagement";
+import {
+  getCurrentUserId, getEngagementCounts, getMyReactions, recordView, toggleInterested,
+  addComment, getComments, reportJob, getCommentLikeCounts, getMyCommentLikes, toggleCommentLike,
+} from "@/lib/job-engagement";
 import type { EngagementCounts, JobComment } from "@/lib/job-engagement";
 import {
   INTEREST_CATEGORIES, computeMatches, computeXploreMatches,
-  syncMatches, markMatchesSeen, getMyInterests, setMyInterests,
-  scoreMatch,
+  syncMatches, getMyInterests, setMyInterests,
 } from "@/lib/xplore-matches";
 import type { JobMatch, XploreMatch, XploreCategory } from "@/lib/xplore-matches";
 
@@ -57,6 +59,19 @@ interface XploreResponse {
 type PanelId = "jobs" | "internships" | "scholarships" | "grants";
 type JobTypeFilter = JobType | "All";
 type Recency = "all" | "24h" | "7d" | "30d";
+
+interface GlobalFilters {
+  recency: Recency;
+  location: string;
+  jobType: JobTypeFilter;
+  level: string;
+  fundingType: string;
+  category: string;
+}
+
+const DEFAULT_FILTERS: GlobalFilters = {
+  recency: "all", location: "", jobType: "All", level: "", fundingType: "", category: "",
+};
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -396,10 +411,6 @@ function XploreCard({ item, section, saved, onSave, match, userId }: {
   const [counts, setCounts] = useState<EngagementCounts>({ interestedCount: 0, viewCount: 0, commentCount: 0 });
   const [interested, setInterested] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
-  const [comments, setComments] = useState<JobComment[]>([]);
-  const [loadingComments, setLoadingComments] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [replyTo, setReplyTo] = useState<string | null>(null);
   const [shared, setShared] = useState(false);
   const [reported, setReported] = useState(false);
   const viewRecorded = useRef(false);
@@ -440,21 +451,7 @@ function XploreCard({ item, section, saved, onSave, match, userId }: {
     setLoadingComments(false);
   };
 
-  const toggleComments = () => {
-    const next = !commentsOpen;
-    setCommentsOpen(next);
-    if (next && comments.length === 0) loadComments();
-  };
-
-  const submitComment = async () => {
-    if (!userId) return requireAuth();
-    const text = draft.trim();
-    if (!text) return;
-    await addComment(item.id, userId, text, replyTo);
-    setDraft(""); setReplyTo(null);
-    setCounts((prev) => ({ ...prev, commentCount: prev.commentCount + 1 }));
-    loadComments();
-  };
+  const toggleComments = () => setCommentsOpen((v) => !v);
 
   const handleShare = async () => {
     try {
@@ -487,22 +484,14 @@ function XploreCard({ item, section, saved, onSave, match, userId }: {
     if (item.duration) chips.push(item.duration);
   }
 
-  const topLevel = comments.filter((c) => !c.parentId);
-  const repliesOf = (id: string) => comments.filter((c) => c.parentId === id);
-
   return (
     <div className="rounded-xl border border-border bg-surface-1 p-4 space-y-2.5">
-      {/* Title + save */}
+      {/* Title + view count */}
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm font-semibold leading-snug flex-1 line-clamp-2">{item.title}</p>
-        <div className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
-          <span className="flex items-center gap-0.5 font-mono text-[9px] text-muted-foreground">
-            <Eye className="h-3 w-3" />{counts.viewCount}
-          </span>
-          <button onClick={() => onSave(item)} className="text-muted-foreground hover:text-primary transition">
-            {saved ? <BookmarkCheck className="h-4 w-4 text-primary" /> : <Bookmark className="h-4 w-4" />}
-          </button>
-        </div>
+        <span className="flex items-center gap-0.5 font-mono text-[9px] text-muted-foreground flex-shrink-0 mt-0.5">
+          <Eye className="h-3 w-3" />{counts.viewCount}
+        </span>
       </div>
 
       {/* Match badge */}
@@ -553,6 +542,10 @@ function XploreCard({ item, section, saved, onSave, match, userId }: {
           className="flex items-center gap-1 rounded-md px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground">
           <Share2 className="h-3.5 w-3.5" />{shared ? "Copied" : "Share"}
         </button>
+        <button onClick={() => onSave(item)}
+          className={`flex items-center gap-1 rounded-md px-2 py-1 font-mono text-[10px] uppercase tracking-wider transition ${saved ? "text-primary" : "text-muted-foreground hover:text-primary"}`}>
+          <Bookmark className={`h-3.5 w-3.5 ${saved ? "fill-primary" : ""}`} />
+        </button>
         <button onClick={handleReport} disabled={reported}
           className="flex items-center gap-1 rounded-md px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-destructive disabled:opacity-50">
           <Flag className="h-3.5 w-3.5" />
@@ -561,47 +554,160 @@ function XploreCard({ item, section, saved, onSave, match, userId }: {
 
       {/* Comments */}
       {commentsOpen && (
-        <div className="space-y-2 border-t border-border pt-2">
-          {loadingComments ? (
-            <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Loading...</p>
-          ) : topLevel.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No comments yet.</p>
-          ) : topLevel.map((cm) => (
-            <div key={cm.id} className="space-y-1.5">
-              <div className="rounded-md bg-surface-2 px-2.5 py-2 text-xs">
-                <p>{cm.content}</p>
-                <div className="mt-1 flex items-center gap-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-                  <span>{timeAgo(cm.createdAt)}</span>
-                  <button onClick={() => setReplyTo(cm.id)} className="hover:text-primary">Reply</button>
-                </div>
-              </div>
-              {repliesOf(cm.id).map((r) => (
-                <div key={r.id} className="ml-4 flex items-start gap-1.5">
-                  <CornerDownRight className="mt-2 h-3 w-3 shrink-0 text-muted-foreground" />
-                  <div className="flex-1 rounded-md bg-surface-2 px-2.5 py-2 text-xs">
-                    <p>{r.content}</p>
-                    <span className="mt-1 block font-mono text-[9px] uppercase tracking-wider text-muted-foreground">{timeAgo(r.createdAt)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ))}
-          <div className="flex items-center gap-1.5 pt-1">
-            {replyTo && <button onClick={() => setReplyTo(null)} className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-primary">Replying ×</button>}
-            <input value={draft} onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && submitComment()}
-              placeholder={userId ? "Add a comment..." : "Sign in to comment"}
-              disabled={!userId}
-              className="flex-1 rounded-md border border-border bg-surface-1 px-2.5 py-1.5 text-xs focus:border-primary focus:outline-none disabled:opacity-50" />
-            <button onClick={submitComment} disabled={!draft.trim()}
-              className="rounded-md bg-primary p-1.5 text-primary-foreground disabled:opacity-50">
-              <Send className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
+        <CommentThread itemId={item.id} userId={userId} onCountChange={(d) => setCounts((prev) => ({ ...prev, commentCount: prev.commentCount + d }))} />
       )}
 
       <p className="font-mono text-[8px] uppercase tracking-wider text-muted-foreground/60">via {item.source} · {timeAgo(item.fetched_at)}</p>
+    </div>
+  );
+}
+
+// ─── Shared Comment Thread (YouTube-style flat threading + likes) ────────────
+
+function CommentThread({ itemId, userId, onCountChange }: {
+  itemId: string; userId: string | null; onCountChange: (delta: number) => void;
+}) {
+  const navigate = useNavigate();
+  const [comments, setComments] = useState<JobComment[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [replyingTo, setReplyingTo] = useState<{ topLevelId: string; snippet: string } | null>(null);
+  const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set());
+  const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
+  const [myLikes, setMyLikes] = useState<Set<string>>(new Set());
+
+  const load = async () => {
+    setLoading(true);
+    const list = await getComments(itemId);
+    setComments(list);
+    const ids = list.map((c) => c.id);
+    const [counts, mine] = await Promise.all([
+      getCommentLikeCounts(ids),
+      userId ? getMyCommentLikes(ids, userId) : Promise.resolve(new Set<string>()),
+    ]);
+    setLikeCounts(counts);
+    setMyLikes(mine);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, [itemId]);
+
+  const requireAuth = () => navigate({ to: "/auth" });
+
+  // Flatten: find each comment's top-level ancestor so all replies (any depth)
+  // group under one thread — matches YouTube's flat reply behaviour.
+  const topLevelOf = (id: string): string => {
+    let cur = comments.find((c) => c.id === id);
+    while (cur?.parentId) {
+      const parent = comments.find((c) => c.id === cur!.parentId);
+      if (!parent) break;
+      cur = parent;
+    }
+    return cur?.id ?? id;
+  };
+
+  const topLevelComments = comments.filter((c) => !c.parentId);
+  const repliesFor = (topId: string) => comments.filter((c) => c.parentId && topLevelOf(c.id) === topId);
+
+  const submit = async () => {
+    if (!userId) return requireAuth();
+    const text = draft.trim();
+    if (!text) return;
+    const parentId = replyingTo?.topLevelId ?? null;
+    await addComment(itemId, userId, text, parentId);
+    setDraft("");
+    setReplyingTo(null);
+    onCountChange(1);
+    load();
+    if (parentId) setExpandedThreads((prev) => new Set(prev).add(parentId));
+  };
+
+  const startReply = (topLevelId: string, snippet: string) => {
+    setReplyingTo({ topLevelId, snippet: snippet.slice(0, 40) });
+  };
+
+  const toggleThread = (id: string) => {
+    setExpandedThreads((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleLike = (commentId: string) => {
+    if (!userId) return requireAuth();
+    const liked = myLikes.has(commentId);
+    setMyLikes((prev) => { const next = new Set(prev); if (liked) next.delete(commentId); else next.add(commentId); return next; });
+    setLikeCounts((prev) => ({ ...prev, [commentId]: (prev[commentId] ?? 0) + (liked ? -1 : 1) }));
+    toggleCommentLike(commentId, userId, liked);
+  };
+
+  const CommentRow = ({ comment, isReply }: { comment: JobComment; isReply: boolean }) => {
+    const liked = myLikes.has(comment.id);
+    const likeCount = likeCounts[comment.id] ?? 0;
+    return (
+      <div className={isReply ? "ml-4 flex items-start gap-1.5" : ""}>
+        {isReply && <CornerDownRight className="mt-2 h-3 w-3 shrink-0 text-muted-foreground" />}
+        <div className="flex-1 rounded-md bg-surface-2 px-2.5 py-2 text-xs">
+          <p>{comment.content}</p>
+          <div className="mt-1 flex items-center gap-3 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+            <span>{jobTimeAgo(comment.createdAt)}</span>
+            <button onClick={() => handleLike(comment.id)} className={`flex items-center gap-1 transition ${liked ? "text-destructive" : "hover:text-destructive"}`}>
+              <Heart className={`h-3 w-3 ${liked ? "fill-destructive" : ""}`} />
+              {likeCount > 0 ? likeCount : "Like"}
+            </button>
+            <button onClick={() => startReply(topLevelOf(comment.id), comment.content)} className="hover:text-primary">Reply</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-2 border-t border-border pt-2">
+      {loading ? (
+        <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Loading comments...</p>
+      ) : topLevelComments.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No comments yet.</p>
+      ) : (
+        topLevelComments.map((c) => {
+          const replies = repliesFor(c.id);
+          const expanded = expandedThreads.has(c.id);
+          return (
+            <div key={c.id} className="space-y-1.5">
+              <CommentRow comment={c} isReply={false} />
+              {replies.length > 0 && (
+                <button onClick={() => toggleThread(c.id)}
+                  className="ml-1 font-mono text-[9px] uppercase tracking-wider text-primary">
+                  {expanded ? "Hide" : "View"} {replies.length} repl{replies.length === 1 ? "y" : "ies"}
+                </button>
+              )}
+              {expanded && (
+                <div className="space-y-1.5">
+                  {replies.map((r) => <CommentRow key={r.id} comment={r} isReply />)}
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
+
+      <div className="pt-1">
+        {replyingTo && (
+          <div className="mb-1.5 flex items-center gap-1.5 rounded-md bg-surface-2 px-2 py-1">
+            <span className="flex-1 truncate text-[10px] text-muted-foreground">Replying to: "{replyingTo.snippet}..."</span>
+            <button onClick={() => setReplyingTo(null)} className="text-muted-foreground"><X className="h-3 w-3" /></button>
+          </div>
+        )}
+        <div className="flex items-center gap-1.5">
+          <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()}
+            placeholder={userId ? (replyingTo ? "Write a reply..." : "Add a comment...") : "Sign in to comment"} disabled={!userId}
+            className="flex-1 rounded-md border border-border bg-surface-1 px-2.5 py-1.5 text-xs focus:border-primary focus:outline-none disabled:opacity-50" />
+          <button onClick={submit} disabled={!draft.trim()} className="rounded-md bg-primary p-1.5 text-primary-foreground disabled:opacity-50">
+            <Send className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -618,10 +724,6 @@ function InlineJobCard({ job, userId, counts, interested, isSaved, match, onCoun
   const navigate = useNavigate();
   const c = counts ?? { interestedCount: 0, viewCount: 0, commentCount: 0 };
   const [commentsOpen, setCommentsOpen] = useState(false);
-  const [comments, setComments] = useState<JobComment[]>([]);
-  const [loadingComments, setLoadingComments] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [replyTo, setReplyTo] = useState<string | null>(null);
   const [shared, setShared] = useState(false);
   const [reported, setReported] = useState(false);
   const viewRecorded = useRef(false);
@@ -642,25 +744,7 @@ function InlineJobCard({ job, userId, counts, interested, isSaved, match, onCoun
     onCountsChange(job.id, (prev) => ({ ...prev, interestedCount: prev.interestedCount + (next ? 1 : -1) }));
     toggleInterested(job.id, userId, interested);
   };
-  const loadComments = async () => {
-    setLoadingComments(true);
-    setComments(await getComments(job.id));
-    setLoadingComments(false);
-  };
-  const toggleComments = () => {
-    const next = !commentsOpen;
-    setCommentsOpen(next);
-    if (next && comments.length === 0) loadComments();
-  };
-  const submitComment = async () => {
-    if (!userId) return requireAuth();
-    const text = draft.trim();
-    if (!text) return;
-    await addComment(job.id, userId, text, replyTo);
-    setDraft(""); setReplyTo(null);
-    onCountsChange(job.id, (prev) => ({ ...prev, commentCount: prev.commentCount + 1 }));
-    loadComments();
-  };
+  const toggleComments = () => setCommentsOpen((v) => !v);
   const handleShare = async () => {
     try {
       if (navigator.share) await navigator.share({ title: job.title, text: `${job.title} at ${job.company}`, url: job.applyUrl });
@@ -673,8 +757,6 @@ function InlineJobCard({ job, userId, counts, interested, isSaved, match, onCoun
     setReported(true);
     await reportJob(job.id, userId, "flagged_by_user");
   };
-  const topLevel = comments.filter((cm) => !cm.parentId);
-  const repliesOf = (id: string) => comments.filter((cm) => cm.parentId === id);
 
   return (
     <article className="rounded-md border border-border bg-surface-1 p-3">
@@ -735,41 +817,7 @@ function InlineJobCard({ job, userId, counts, interested, isSaved, match, onCoun
       </div>
 
       {commentsOpen && (
-        <div className="mt-2 space-y-2 border-t border-border pt-2">
-          {loadingComments ? (
-            <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Loading comments...</p>
-          ) : topLevel.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No comments yet.</p>
-          ) : topLevel.map((cm) => (
-            <div key={cm.id} className="space-y-1.5">
-              <div className="rounded-md bg-surface-2 px-2.5 py-2 text-xs">
-                <p>{cm.content}</p>
-                <div className="mt-1 flex items-center gap-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-                  <span>{jobTimeAgo(cm.createdAt)}</span>
-                  <button onClick={() => setReplyTo(cm.id)} className="hover:text-primary">Reply</button>
-                </div>
-              </div>
-              {repliesOf(cm.id).map((r) => (
-                <div key={r.id} className="ml-4 flex items-start gap-1.5">
-                  <CornerDownRight className="mt-2 h-3 w-3 shrink-0 text-muted-foreground" />
-                  <div className="flex-1 rounded-md bg-surface-2 px-2.5 py-2 text-xs">
-                    <p>{r.content}</p>
-                    <span className="mt-1 block font-mono text-[9px] uppercase tracking-wider text-muted-foreground">{jobTimeAgo(r.createdAt)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ))}
-          <div className="flex items-center gap-1.5 pt-1">
-            {replyTo && <button onClick={() => setReplyTo(null)} className="shrink-0 font-mono text-[9px] uppercase tracking-wider text-primary">Replying ×</button>}
-            <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitComment()}
-              placeholder={userId ? "Add a comment..." : "Sign in to comment"} disabled={!userId}
-              className="flex-1 rounded-md border border-border bg-surface-1 px-2.5 py-1.5 text-xs focus:border-primary focus:outline-none disabled:opacity-50" />
-            <button onClick={submitComment} disabled={!draft.trim()} className="rounded-md bg-primary p-1.5 text-primary-foreground disabled:opacity-50">
-              <Send className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
+        <CommentThread itemId={job.id} userId={userId} onCountChange={(d) => onCountsChange(job.id, (prev) => ({ ...prev, commentCount: prev.commentCount + d }))} />
       )}
     </article>
   );
@@ -777,9 +825,9 @@ function InlineJobCard({ job, userId, counts, interested, isSaved, match, onCoun
 
 // ─── Jobs Panel ───────────────────────────────────────────────────────────────
 
-function JobsPanel({ scrollRef, isActive, onScroll, userId, interests, onOpenInterests }: {
+function JobsPanel({ scrollRef, isActive, onScroll, userId, interests, onOpenInterests, query, filters }: {
   scrollRef: React.RefObject<HTMLDivElement>; isActive: boolean; onScroll: (y: number) => void;
-  userId: string | null; interests: string[]; onOpenInterests: () => void;
+  userId: string | null; interests: string[]; onOpenInterests: () => void; query: string; filters: GlobalFilters;
 }) {
   const { update: updateAppState, state: appState } = useAppState();
   const [jobs, setJobs] = useState<JobListing[]>([]);
@@ -787,11 +835,6 @@ function JobsPanel({ scrollRef, isActive, onScroll, userId, interests, onOpenInt
   const [sources, setSources] = useState<SourceStatus[]>([]);
   const [showSourceDetail, setShowSourceDetail] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [query, setQuery] = useState("");
-  const [typeFilter, setTypeFilter] = useState<JobTypeFilter>("All");
-  const [locationQuery, setLocationQuery] = useState("");
-  const [recency, setRecency] = useState<Recency>("all");
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [engagementMap, setEngagementMap] = useState<Record<string, EngagementCounts>>({});
   const [myReactions, setMyReactions] = useState<Set<string>>(new Set());
@@ -847,19 +890,19 @@ function JobsPanel({ scrollRef, isActive, onScroll, userId, interests, onOpenInt
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const loc = locationQuery.trim().toLowerCase();
+    const loc = filters.location.trim().toLowerCase();
     const recencyMs: Record<Exclude<Recency, "all">, number> = { "24h": 86400000, "7d": 604800000, "30d": 2592000000 };
     const now = Date.now();
     return jobs.filter((j) => {
-      if (typeFilter !== "All" && j.type !== typeFilter) return false;
+      if (filters.jobType !== "All" && j.type !== filters.jobType) return false;
       if (loc && !j.location.toLowerCase().includes(loc)) return false;
-      if (recency !== "all" && now - new Date(j.postedAt).getTime() > recencyMs[recency]) return false;
+      if (filters.recency !== "all" && now - new Date(j.postedAt).getTime() > recencyMs[filters.recency]) return false;
       if (!q) return true;
       return j.title.toLowerCase().includes(q) || j.company.toLowerCase().includes(q) || j.location.toLowerCase().includes(q);
     });
-  }, [jobs, query, typeFilter, locationQuery, recency]);
+  }, [jobs, query, filters]);
 
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [query, typeFilter, locationQuery, recency]);
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [query, filters]);
 
   const handleCountsChange = (jobId: string, updater: (c: EngagementCounts) => EngagementCounts) => {
     setEngagementMap((prev) => ({ ...prev, [jobId]: updater(prev[jobId] ?? { interestedCount: 0, viewCount: 0, commentCount: 0 }) }));
@@ -884,41 +927,6 @@ function JobsPanel({ scrollRef, isActive, onScroll, userId, interests, onOpenInt
       <div className="px-4 pt-3 pb-6 space-y-3">
         {true && (
           <>
-            {/* Search */}
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search title, company, location"
-                className="w-full rounded-md border border-border bg-surface-1 py-2.5 pl-9 pr-3 text-sm focus:border-primary focus:outline-none" />
-            </div>
-            <button onClick={() => setFiltersOpen((v) => !v)}
-              className="flex w-full items-center justify-between rounded-md border border-border bg-surface-1 px-3 py-2.5 text-sm text-muted-foreground">
-              <span className="flex items-center gap-2"><SlidersHorizontal className="h-3.5 w-3.5" /> Filters</span>
-              <span className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-primary">
-                {filtersOpen ? "Hide" : "Show"}{filtersOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-              </span>
-            </button>
-            {filtersOpen && (
-              <div className="space-y-3 rounded-md border border-border bg-surface-1 p-3">
-                <div className="relative">
-                  <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <input value={locationQuery} onChange={(e) => setLocationQuery(e.target.value)} placeholder="Filter by location"
-                    className="w-full rounded-md border border-border bg-surface-2 py-2.5 pl-9 pr-3 text-sm focus:border-primary focus:outline-none" />
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {["All", ...JOB_TYPES].map((t) => (
-                    <button key={t} onClick={() => setTypeFilter(t as JobTypeFilter)}
-                      className={`rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition ${typeFilter === t ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground"}`}>{t}</button>
-                  ))}
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {RECENCY_OPTIONS.map((r) => (
-                    <button key={r.value} onClick={() => setRecency(r.value)}
-                      className={`rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition ${recency === r.value ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground"}`}>{r.label}</button>
-                  ))}
-                </div>
-              </div>
-            )}
-
             <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
               <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
               {lastSyncedAt ? `Updated ${jobTimeAgo(lastSyncedAt)} · ${filtered.length} shown` : loading ? "Syncing..." : `${filtered.length} shown`}
@@ -971,10 +979,10 @@ function JobsPanel({ scrollRef, isActive, onScroll, userId, interests, onOpenInt
 
 // ─── Xplore Section Panel ─────────────────────────────────────────────────────
 
-function XploreSectionPanel({ section, isActive, scrollRef, onScroll, interests, query, userId }: {
+function XploreSectionPanel({ section, isActive, scrollRef, onScroll, interests, query, userId, filters }: {
   section: Exclude<PanelId, "jobs">; isActive: boolean;
   scrollRef: React.RefObject<HTMLDivElement>; onScroll: (y: number) => void;
-  interests: string[]; query: string; userId: string | null;
+  interests: string[]; query: string; userId: string | null; filters: GlobalFilters;
 }) {
   const [items, setItems] = useState<XploreItem[] | null>(null);
   const [sources, setSources] = useState<XploreResponse["sources"]>([]);
@@ -1020,13 +1028,28 @@ function XploreSectionPanel({ section, isActive, scrollRef, onScroll, interests,
   const filteredItems = useMemo(() => {
     if (!items) return [];
     const q = query.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((i) =>
-      i.title.toLowerCase().includes(q) ||
-      (i.description ?? "").toLowerCase().includes(q) ||
-      (i.source ?? "").toLowerCase().includes(q)
-    );
-  }, [items, query]);
+    const loc = filters.location.trim().toLowerCase();
+    const recencyMs: Record<Exclude<Recency, "all">, number> = { "24h": 86400000, "7d": 604800000, "30d": 2592000000 };
+    const now = Date.now();
+    return items.filter((i) => {
+      if (loc) {
+        const itemCountry = (i.country ?? "").toLowerCase();
+        if (!itemCountry.includes(loc)) return false;
+      }
+      if (filters.recency !== "all" && now - new Date(i.fetched_at).getTime() > recencyMs[filters.recency]) return false;
+      if (section === "scholarships") {
+        if (filters.level && i.level !== filters.level) return false;
+        if (filters.fundingType && i.funding_type !== filters.fundingType) return false;
+      }
+      if (section === "grants" && filters.category && i.category !== filters.category) return false;
+      if (!q) return true;
+      return (
+        i.title.toLowerCase().includes(q) ||
+        (i.description ?? "").toLowerCase().includes(q) ||
+        (i.source ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [items, query, filters, section]);
 
   const errCount = sources.filter((s) => s.count === 0).length;
 
@@ -1093,6 +1116,8 @@ function XplorePage() {
   const [showPost, setShowPost] = useState(false);
   const [globalQuery, setGlobalQuery] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filters, setFilters] = useState<GlobalFilters>(DEFAULT_FILTERS);
+  const activeFilterCount = Object.entries(filters).filter(([k, v]) => v !== DEFAULT_FILTERS[k as keyof GlobalFilters]).length;
 
   const scrollRefs: Record<PanelId, React.RefObject<HTMLDivElement>> = {
     jobs: useRef<HTMLDivElement>(null),
@@ -1109,6 +1134,20 @@ function XplorePage() {
   const lastScrollY = useRef(0);
   const headerVisible = useRef(true);
   const [headerShown, setHeaderShown] = useState(true);
+  const [headerHeight, setHeaderHeight] = useState(999);
+
+  useEffect(() => {
+    const measure = () => {
+      if (headerRef.current) setHeaderHeight(headerRef.current.scrollHeight);
+    };
+    // Measure after paint so dynamically-shown filter panel is accounted for
+    const raf = requestAnimationFrame(measure);
+    window.addEventListener("resize", measure);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", measure);
+    };
+  }, [filtersOpen, activePanel]);
 
   useEffect(() => {
     getCurrentUserId().then((uid) => {
@@ -1168,67 +1207,141 @@ function XplorePage() {
       <TopBar />
 
       <div className="mx-auto w-full max-w-md flex flex-col flex-1 overflow-hidden pb-20">
-        {/* Header + Search + Tab bar — all move together on scroll */}
+        {/* Header + Search + Tab bar — collapses via max-height so feed fills the space */}
         <div
-          ref={headerRef}
           style={{
-            transform: headerShown ? "translateY(0)" : "translateY(-110%)",
-            transition: "transform 220ms ease",
-            position: "relative",
-            zIndex: 10,
+            maxHeight: headerShown ? `${headerHeight}px` : "0px",
+            overflow: "hidden",
+            transition: "max-height 220ms ease",
           }}
           className="flex-shrink-0 bg-background"
         >
-          {/* Xplore branding row */}
-          <div className="px-4 pt-4 pb-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="rounded-sm bg-primary px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-primary-foreground">🧭</span>
-                <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Xplore</span>
+          <div ref={headerRef}>
+            {/* Xplore branding row */}
+            <div className="px-4 pt-4 pb-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="rounded-sm bg-primary px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-primary-foreground">🧭</span>
+                  <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Xplore</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => { if (!userId) navigate({ to: "/auth" }); else setShowInterests(true); }}
+                    className="flex items-center gap-1 rounded-full border border-border px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-primary hover:border-primary transition">
+                    <Target className="h-3 w-3" /> Matches
+                  </button>
+                  <button onClick={() => setShowPost(true)}
+                    className="flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-primary-foreground">
+                    <Plus className="h-3 w-3" /> Post
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => { if (!userId) navigate({ to: "/auth" }); else setShowInterests(true); }}
-                  className="flex items-center gap-1 rounded-full border border-border px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-primary hover:border-primary transition">
-                  <Target className="h-3 w-3" /> Matches
-                </button>
-                <button onClick={() => setShowPost(true)}
-                  className="flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-primary-foreground">
-                  <Plus className="h-3 w-3" /> Post
-                </button>
+              <p className="mt-1.5 text-xs text-muted-foreground">Jobs, internships, scholarships & grants — updated every few hours.</p>
+            </div>
+
+            {/* Global search + Filters toggle */}
+            <div className="px-4 pb-2 flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <input value={globalQuery} onChange={(e) => setGlobalQuery(e.target.value)}
+                  placeholder={`Search ${activePanel}...`}
+                  className="w-full rounded-md border border-border bg-surface-1 py-2 pl-9 pr-3 text-sm focus:border-primary focus:outline-none" />
               </div>
+              <button onClick={() => setFiltersOpen((v) => !v)}
+                className={`relative flex items-center gap-1 rounded-md border px-2.5 py-2 font-mono text-[10px] uppercase tracking-wider transition ${
+                  filtersOpen || activeFilterCount > 0 ? "border-primary text-primary" : "border-border text-muted-foreground"
+                }`}>
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                {activeFilterCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[8px] text-primary-foreground">{activeFilterCount}</span>
+                )}
+              </button>
             </div>
-            <p className="mt-1.5 text-xs text-muted-foreground">Jobs, internships, scholarships & grants — updated every few hours.</p>
-          </div>
 
-          {/* Global search */}
-          <div className="px-4 pb-2">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input value={globalQuery} onChange={(e) => setGlobalQuery(e.target.value)}
-                placeholder={`Search ${activePanel}...`}
-                className="w-full rounded-md border border-border bg-surface-1 py-2 pl-9 pr-3 text-sm focus:border-primary focus:outline-none" />
-            </div>
-          </div>
+            {/* Context-aware filter panel — fields change per active tab */}
+            {filtersOpen && (
+              <div className="px-4 pb-2">
+                <div className="space-y-3 rounded-md border border-border bg-surface-1 p-3">
+                  {/* Location/Country — shared across all tabs */}
+                  <div className="relative">
+                    <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <input value={filters.location} onChange={(e) => setFilters((f) => ({ ...f, location: e.target.value }))}
+                      placeholder={activePanel === "jobs" || activePanel === "internships" ? "Filter by location" : "Filter by country"}
+                      className="w-full rounded-md border border-border bg-surface-2 py-2.5 pl-9 pr-3 text-sm focus:border-primary focus:outline-none" />
+                  </div>
 
-          {/* Panel tab bar — horizontally scrollable, no overlap */}
-          <div className="px-4 pb-3">
-            <div
-              ref={tabBarRef}
-              className="flex overflow-x-auto no-scrollbar rounded-md border border-border bg-surface-1 p-1 gap-1"
-            >
-              {PANELS.map(({ id, label, icon: Icon }) => (
-                <button
-                  key={id}
-                  ref={(el) => { if (el) tabRefs.current[id] = el; }}
-                  onClick={() => switchPanel(id)}
-                  className={`flex flex-shrink-0 items-center justify-center gap-1.5 rounded-sm px-4 py-2 font-mono text-[10px] uppercase tracking-wider transition whitespace-nowrap ${
-                    activePanel === id ? "bg-primary text-primary-foreground" : "text-muted-foreground"
-                  }`}
-                >
-                  <Icon className="h-3 w-3 flex-shrink-0" />
-                  {label}
-                </button>
-              ))}
+                  {/* Jobs / Internships — Type chips */}
+                  {(activePanel === "jobs" || activePanel === "internships") && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {["All", ...JOB_TYPES].map((t) => (
+                        <button key={t} onClick={() => setFilters((f) => ({ ...f, jobType: t as JobTypeFilter }))}
+                          className={`rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition ${filters.jobType === t ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground"}`}>{t}</button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Scholarships — Level + Funding type */}
+                  {activePanel === "scholarships" && (
+                    <>
+                      <div className="flex flex-wrap gap-1.5">
+                        {["", "Undergraduate", "Postgraduate", "PhD"].map((lvl) => (
+                          <button key={lvl || "any"} onClick={() => setFilters((f) => ({ ...f, level: lvl }))}
+                            className={`rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition ${filters.level === lvl ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground"}`}>{lvl || "Any level"}</button>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {["", "full", "partial"].map((ft) => (
+                          <button key={ft || "any"} onClick={() => setFilters((f) => ({ ...f, fundingType: ft }))}
+                            className={`rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition ${filters.fundingType === ft ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground"}`}>{ft === "full" ? "Full funding" : ft === "partial" ? "Partial" : "Any funding"}</button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+
+                  {/* Grants — Category */}
+                  {activePanel === "grants" && (
+                    <div className="relative">
+                      <input value={filters.category} onChange={(e) => setFilters((f) => ({ ...f, category: e.target.value }))}
+                        placeholder="Filter by category (e.g. government, nonprofit)"
+                        className="w-full rounded-md border border-border bg-surface-2 px-3 py-2.5 text-sm focus:border-primary focus:outline-none" />
+                    </div>
+                  )}
+
+                  {/* Recency — shared across all tabs */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {RECENCY_OPTIONS.map((r) => (
+                      <button key={r.value} onClick={() => setFilters((f) => ({ ...f, recency: r.value }))}
+                        className={`rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition ${filters.recency === r.value ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground"}`}>{r.label}</button>
+                    ))}
+                  </div>
+
+                  {activeFilterCount > 0 && (
+                    <button onClick={() => setFilters(DEFAULT_FILTERS)}
+                      className="font-mono text-[10px] uppercase tracking-wider text-destructive">Clear all filters</button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Panel tab bar — horizontally scrollable, no overlap */}
+            <div className="px-4 pb-3">
+              <div
+                ref={tabBarRef}
+                className="flex overflow-x-auto no-scrollbar rounded-md border border-border bg-surface-1 p-1 gap-1"
+              >
+                {PANELS.map(({ id, label, icon: Icon }) => (
+                  <button
+                    key={id}
+                    ref={(el) => { if (el) tabRefs.current[id] = el; }}
+                    onClick={() => switchPanel(id)}
+                    className={`flex flex-shrink-0 items-center justify-center gap-1.5 rounded-sm px-4 py-2 font-mono text-[10px] uppercase tracking-wider transition whitespace-nowrap ${
+                      activePanel === id ? "bg-primary text-primary-foreground" : "text-muted-foreground"
+                    }`}
+                  >
+                    <Icon className="h-3 w-3 flex-shrink-0" />
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -1243,11 +1356,12 @@ function XplorePage() {
                 {id === "jobs" ? (
                   <JobsPanel scrollRef={scrollRefs.jobs} isActive={activePanel === "jobs"}
                     onScroll={(y) => handleScroll("jobs", y)} userId={userId} interests={interests}
-                    onOpenInterests={() => { if (!userId) navigate({ to: "/auth" }); else setShowInterests(true); }} />
+                    onOpenInterests={() => { if (!userId) navigate({ to: "/auth" }); else setShowInterests(true); }}
+                    query={globalQuery} filters={filters} />
                 ) : (
                   <XploreSectionPanel section={id} isActive={activePanel === id}
                     scrollRef={scrollRefs[id]} onScroll={(y) => handleScroll(id, y)}
-                    interests={interests} query={globalQuery} userId={userId} />
+                    interests={interests} query={globalQuery} userId={userId} filters={filters} />
                 )}
               </div>
             );
