@@ -152,10 +152,65 @@ function formatDeadline(deadline: string | null, rolling: boolean) {
   return { text: `Deadline: ${d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`, urgent: false };
 }
 
-async function fetchSection(type: Exclude<PanelId, "jobs">, page = 1): Promise<XploreResponse> {
+// ─── Client-side cache (stale-while-revalidate) ────────────────────────────
+// Server data refreshes on a cron (internships/scholarships every ~2h, grants
+// every ~3h), so a 15-minute client cache is safe and eliminates the blocking
+// "Loading..." wait on every tab open — cached data renders instantly while
+// a background refresh keeps it current.
+const XPLORE_CACHE_PREFIX = "xplore_cache_";
+const XPLORE_CACHE_MAX_AGE_MS = 15 * 60 * 1000;
+
+interface XploreCacheEntry {
+  data: XploreResponse;
+  cachedAt: string;
+}
+
+function readXploreCache(type: string): XploreCacheEntry | null {
+  try {
+    const raw = localStorage.getItem(XPLORE_CACHE_PREFIX + type);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.data) return null;
+    return parsed as XploreCacheEntry;
+  } catch {
+    return null;
+  }
+}
+
+function writeXploreCache(type: string, data: XploreResponse) {
+  try {
+    localStorage.setItem(XPLORE_CACHE_PREFIX + type, JSON.stringify({ data, cachedAt: new Date().toISOString() }));
+  } catch {
+    // storage full or unavailable; not fatal, next session just refetches
+  }
+}
+
+async function fetchSectionLive(type: Exclude<PanelId, "jobs">, page = 1): Promise<XploreResponse> {
   const res = await fetch(`${SUPABASE_URL}/functions/v1/get-xplore?type=${type}&page=${page}&limit=30`);
   if (!res.ok) throw new Error(`get-xplore ${res.status}`);
   return res.json();
+}
+
+async function fetchSection(type: Exclude<PanelId, "jobs">, page = 1): Promise<XploreResponse> {
+  // Cache is keyed by type only (page 1), matching how panels actually use it
+  const cache = page === 1 ? readXploreCache(type) : null;
+  const cacheAge = cache ? Date.now() - new Date(cache.cachedAt).getTime() : Infinity;
+
+  if (cache && cacheAge < XPLORE_CACHE_MAX_AGE_MS) {
+    // Return cached data instantly; refresh in background without blocking.
+    fetchSectionLive(type, page).then((fresh) => writeXploreCache(type, fresh)).catch(() => {});
+    return cache.data;
+  }
+
+  try {
+    const fresh = await fetchSectionLive(type, page);
+    if (page === 1) writeXploreCache(type, fresh);
+    return fresh;
+  } catch (e) {
+    // Network failed — fall back to stale cache rather than showing an error
+    if (cache) return cache.data;
+    throw e;
+  }
 }
 
 // ─── Interests Picker Modal ───────────────────────────────────────────────────
@@ -919,7 +974,13 @@ function MatchesModal({ userId, interests, onClose, onEditInterests }: {
           <h2 className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider font-semibold"><Target className="h-4 w-4 text-primary" /> Your Matches</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">{matches.length} matches across all categories</p>
         </div>
-        <button onClick={onClose}><X className="h-5 w-5 text-muted-foreground" /></button>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button onClick={onEditInterests}
+            className="flex items-center gap-1 rounded-full border border-border px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-primary hover:border-primary transition">
+            <SlidersHorizontal className="h-3 w-3" /> Interests
+          </button>
+          <button onClick={onClose}><X className="h-5 w-5 text-muted-foreground" /></button>
+        </div>
       </div>
 
       {interests.length > 0 && (
