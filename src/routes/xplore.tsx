@@ -496,9 +496,9 @@ function XploreCard({ item, section, saved, onSave, match, userId }: {
 
       {/* Match badge */}
       {match && (
-        <div className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs ${match.score === "strong" ? "bg-accent/10 text-accent" : "bg-surface-2 text-muted-foreground"}`}>
+        <div className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs ${match.scorePercent >= 70 ? "bg-accent/10 text-accent" : match.scorePercent >= 40 ? "bg-primary/10 text-primary" : "bg-surface-2 text-muted-foreground"}`}>
           <Sparkles className="h-3.5 w-3.5 shrink-0" />
-          <span><strong>{match.score === "strong" ? "Strong match" : "Possible match"}</strong> · {match.matchedInterest}</span>
+          <span><strong>{match.scorePercent}% match</strong> · {match.matchedInterest}</span>
         </div>
       )}
 
@@ -776,9 +776,9 @@ function InlineJobCard({ job, userId, counts, interested, isSaved, match, onCoun
       </div>
 
       {match && (
-        <div className={`mt-2 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs ${match.score === "strong" ? "bg-accent/10 text-accent" : "bg-surface-2 text-muted-foreground"}`}>
+        <div className={`mt-2 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs ${match.scorePercent >= 70 ? "bg-accent/10 text-accent" : match.scorePercent >= 40 ? "bg-primary/10 text-primary" : "bg-surface-2 text-muted-foreground"}`}>
           <Sparkles className="h-3.5 w-3.5 shrink-0" />
-          <span><strong>{match.score === "strong" ? "Strong match" : "Possible match"}</strong> · {match.matchedInterest}</span>
+          <span><strong>{match.scorePercent}% match</strong> · {match.matchedInterest}</span>
         </div>
       )}
 
@@ -794,7 +794,7 @@ function InlineJobCard({ job, userId, counts, interested, isSaved, match, onCoun
 
       <a href={job.applyUrl} target="_blank" rel="noopener noreferrer"
         className="mt-3 flex items-center justify-center gap-1.5 rounded-md bg-primary py-2 font-mono text-[11px] uppercase tracking-wider text-primary-foreground">
-        Apply <ExternalLink className="h-3 w-3" />
+        Learn More <ExternalLink className="h-3 w-3" />
       </a>
 
       <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
@@ -823,10 +823,161 @@ function InlineJobCard({ job, userId, counts, interested, isSaved, match, onCoun
   );
 }
 
+// ─── Matches Modal (full-screen, curated across all 4 categories) ────────────
+
+interface UnifiedMatch {
+  key: string;
+  category: PanelId;
+  scorePercent: number;
+  matchedInterest: string;
+  job?: JobListing;
+  xploreItem?: XploreItem;
+}
+
+function MatchesModal({ userId, interests, onClose, onEditInterests }: {
+  userId: string; interests: string[]; onClose: () => void; onEditInterests: () => void;
+}) {
+  const { update: updateAppState, state: appState } = useAppState();
+  const [loading, setLoading] = useState(true);
+  const [matches, setMatches] = useState<UnifiedMatch[]>([]);
+  const [engagementMap, setEngagementMap] = useState<Record<string, EngagementCounts>>({});
+  const [myReactions, setMyReactions] = useState<Set<string>>(new Set());
+  const [saved, setSaved] = useState<Record<string, XploreItem>>(getSaved);
+  const [activeFilter, setActiveFilter] = useState<"all" | PanelId>("all");
+  const loaded = useRef(false);
+
+  useEffect(() => {
+    if (loaded.current) return;
+    loaded.current = true;
+    if (interests.length === 0) { setLoading(false); return; }
+
+    (async () => {
+      const [jobsResult, internships, scholarships, grants] = await Promise.all([
+        getJobs(),
+        fetchSection("internships").catch(() => ({ items: [] } as Partial<XploreResponse>)),
+        fetchSection("scholarships").catch(() => ({ items: [] } as Partial<XploreResponse>)),
+        fetchSection("grants").catch(() => ({ items: [] } as Partial<XploreResponse>)),
+      ]);
+
+      const jobMatches = computeMatches(jobsResult.jobs, interests);
+      const unified: UnifiedMatch[] = jobMatches.map((m) => ({
+        key: `jobs_${m.job.id}`, category: "jobs", scorePercent: m.scorePercent, matchedInterest: m.matchedInterest, job: m.job,
+      }));
+
+      for (const [cat, items] of [
+        ["internships", internships.items ?? []],
+        ["scholarships", scholarships.items ?? []],
+        ["grants", grants.items ?? []],
+      ] as [XploreCategory, XploreItem[]][]) {
+        const catMatches = computeXploreMatches(items, interests, cat);
+        for (const m of catMatches) {
+          const item = items.find((i) => i.id === m.itemId);
+          if (item) unified.push({ key: `${cat}_${item.id}`, category: cat, scorePercent: m.scorePercent, matchedInterest: m.matchedInterest, xploreItem: item });
+        }
+      }
+
+      // Highest match percentage first
+      unified.sort((a, b) => b.scorePercent - a.scorePercent);
+      setMatches(unified);
+
+      // Load engagement for job matches only (xplore cards load their own internally)
+      const jobIds = unified.filter((m) => m.job).map((m) => m.job!.id);
+      if (jobIds.length > 0) {
+        const [counts, mine] = await Promise.all([
+          getEngagementCounts(jobIds),
+          userId ? getMyReactions(jobIds, userId) : Promise.resolve(new Set<string>()),
+        ]);
+        setEngagementMap(counts);
+        setMyReactions(mine);
+      }
+      setLoading(false);
+    })();
+  }, [interests, userId]);
+
+  const handleCountsChange = (jobId: string, updater: (c: EngagementCounts) => EngagementCounts) => {
+    setEngagementMap((prev) => ({ ...prev, [jobId]: updater(prev[jobId] ?? { interestedCount: 0, viewCount: 0, commentCount: 0 }) }));
+  };
+  const handleInterestedChange = (jobId: string, interested: boolean) => {
+    setMyReactions((prev) => { const next = new Set(prev); if (interested) next.add(jobId); else next.delete(jobId); return next; });
+  };
+  const handleToggleSaveJob = (job: JobListing) => {
+    updateAppState((s) => {
+      const next = { ...(s.saved ?? {}) };
+      if (next[job.id]) delete next[job.id];
+      else next[job.id] = { id: job.id, title: job.title, summary: job.description, url: job.applyUrl, source: job.company, region: job.location, category: "Jobs", publishedAt: job.postedAt, savedAt: new Date().toISOString() };
+      return { ...s, saved: next };
+    });
+  };
+
+  const filteredMatches = activeFilter === "all" ? matches : matches.filter((m) => m.category === activeFilter);
+  const countByCategory = (cat: PanelId) => matches.filter((m) => m.category === cat).length;
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-background">
+      <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-border flex-shrink-0">
+        <div>
+          <h2 className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider font-semibold"><Target className="h-4 w-4 text-primary" /> Your Matches</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">{matches.length} matches across all categories</p>
+        </div>
+        <button onClick={onClose}><X className="h-5 w-5 text-muted-foreground" /></button>
+      </div>
+
+      {interests.length > 0 && (
+        <div className="flex gap-1.5 px-4 pt-3 pb-2 flex-shrink-0 overflow-x-auto no-scrollbar">
+          {(["all", ...PANELS.map((p) => p.id)] as ("all" | PanelId)[]).map((f) => (
+            <button key={f} onClick={() => setActiveFilter(f)}
+              className={`flex-shrink-0 rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition whitespace-nowrap ${
+                activeFilter === f ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground"
+              }`}>
+              {f === "all" ? `All (${matches.length})` : `${PANELS.find((p) => p.id === f)?.label} (${countByCategory(f)})`}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto px-4 pb-6">
+        {interests.length === 0 ? (
+          <div className="mt-6 rounded-xl border border-dashed border-border bg-surface-1 p-8 text-center">
+            <Target className="mx-auto h-8 w-8 text-muted-foreground mb-3" />
+            <p className="text-sm text-muted-foreground mb-3">Set your interests to see curated matches across jobs, internships, scholarships & grants.</p>
+            <button onClick={onEditInterests} className="rounded-md bg-primary px-4 py-2 font-mono text-xs uppercase tracking-wider text-primary-foreground">Set interests</button>
+          </div>
+        ) : loading ? (
+          <div className="mt-3 space-y-2">
+            {[...Array(4)].map((_, i) => <div key={i} className="h-28 rounded-xl bg-surface-1 border border-border animate-pulse" />)}
+          </div>
+        ) : filteredMatches.length === 0 ? (
+          <div className="mt-6 rounded-xl border border-dashed border-border bg-surface-1 p-8 text-center">
+            <Globe className="mx-auto h-8 w-8 text-muted-foreground mb-3" />
+            <p className="text-sm text-muted-foreground">No matches yet in this category. Check back after the next sync.</p>
+          </div>
+        ) : (
+          <div className="mt-3 space-y-2">
+            {filteredMatches.map((m) =>
+              m.job ? (
+                <InlineJobCard key={m.key} job={m.job} userId={userId} counts={engagementMap[m.job.id]}
+                  interested={myReactions.has(m.job.id)} isSaved={!!appState.saved?.[m.job.id]}
+                  match={{ job: m.job, matchedInterest: m.matchedInterest, matchedKeyword: m.matchedInterest, scorePercent: m.scorePercent, matchedInterests: [m.matchedInterest] }}
+                  onCountsChange={handleCountsChange} onInterestedChange={handleInterestedChange} onToggleSave={handleToggleSaveJob} />
+              ) : m.xploreItem ? (
+                <XploreCard key={m.key} item={m.xploreItem} section={m.category as Exclude<PanelId, "jobs">}
+                  saved={!!saved[m.xploreItem.id]} onSave={(i) => setSaved(toggleSavedItem(i))}
+                  match={{ itemId: m.xploreItem.id, itemTitle: m.xploreItem.title, matchedInterest: m.matchedInterest, matchedKeyword: m.matchedInterest, scorePercent: m.scorePercent, matchedInterests: [m.matchedInterest], category: m.category as XploreCategory }}
+                  userId={userId} />
+              ) : null
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Jobs Panel ───────────────────────────────────────────────────────────────
 
-function JobsPanel({ scrollRef, isActive, onScroll, userId, interests, onOpenInterests, query, filters }: {
+function JobsPanel({ scrollRef, isActive, onScroll, onScrollImmediate, userId, interests, onOpenInterests, query, filters }: {
   scrollRef: React.RefObject<HTMLDivElement>; isActive: boolean; onScroll: (y: number) => void;
+  onScrollImmediate: (y: number) => void;
   userId: string | null; interests: string[]; onOpenInterests: () => void; query: string; filters: GlobalFilters;
 }) {
   const { update: updateAppState, state: appState } = useAppState();
@@ -881,9 +1032,16 @@ function JobsPanel({ scrollRef, isActive, onScroll, userId, interests, onOpenInt
     if (pos > 0) setTimeout(() => { if (scrollRef.current) scrollRef.current.scrollTop = pos; }, 60);
   }, [isActive, scrollRef]);
 
+  const rafRef = useRef<number | null>(null);
   const handleScroll = () => {
     if (!scrollRef.current) return;
     const y = scrollRef.current.scrollTop;
+    if (rafRef.current === null) {
+      rafRef.current = requestAnimationFrame(() => {
+        onScrollImmediate(y);
+        rafRef.current = null;
+      });
+    }
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => onScroll(y), 300);
   };
@@ -979,9 +1137,10 @@ function JobsPanel({ scrollRef, isActive, onScroll, userId, interests, onOpenInt
 
 // ─── Xplore Section Panel ─────────────────────────────────────────────────────
 
-function XploreSectionPanel({ section, isActive, scrollRef, onScroll, interests, query, userId, filters }: {
+function XploreSectionPanel({ section, isActive, scrollRef, onScroll, onScrollImmediate, interests, query, userId, filters }: {
   section: Exclude<PanelId, "jobs">; isActive: boolean;
   scrollRef: React.RefObject<HTMLDivElement>; onScroll: (y: number) => void;
+  onScrollImmediate: (y: number) => void;
   interests: string[]; query: string; userId: string | null; filters: GlobalFilters;
 }) {
   const [items, setItems] = useState<XploreItem[] | null>(null);
@@ -1018,9 +1177,16 @@ function XploreSectionPanel({ section, isActive, scrollRef, onScroll, interests,
     setXploreMatches(new Map(matches.map((m) => [m.itemId, m])));
   }, [items, interests, section]);
 
+  const rafRef = useRef<number | null>(null);
   const handleScroll = () => {
     if (!scrollRef.current) return;
     const y = scrollRef.current.scrollTop;
+    if (rafRef.current === null) {
+      rafRef.current = requestAnimationFrame(() => {
+        onScrollImmediate(y);
+        rafRef.current = null;
+      });
+    }
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => onScroll(y), 300);
   };
@@ -1113,6 +1279,7 @@ function XplorePage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [interests, setInterests] = useState<string[]>([]);
   const [showInterests, setShowInterests] = useState(false);
+  const [showMatches, setShowMatches] = useState(false);
   const [showPost, setShowPost] = useState(false);
   const [globalQuery, setGlobalQuery] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -1131,7 +1298,7 @@ function XplorePage() {
   const tabBarRef = useRef<HTMLDivElement>(null);
   const tabRefs = useRef<Partial<Record<PanelId, HTMLButtonElement>>>({});
   const headerRef = useRef<HTMLDivElement>(null);
-  const lastScrollY = useRef<Record<PanelId, number>>({ jobs: 0, internships: 0, scholarships: 0, grants: 0 });
+  const lastScrollY = useRef(0);
   const headerVisible = useRef(true);
   const [headerShown, setHeaderShown] = useState(true);
   const [headerHeight, setHeaderHeight] = useState(999);
@@ -1157,14 +1324,21 @@ function XplorePage() {
   }, []);
 
   const handleScroll = useCallback((panel: PanelId, y: number) => {
+    // Debounced — only persists scroll position to localStorage
     session.current = { ...session.current, scrollPositions: { ...session.current.scrollPositions, [panel]: y } };
     writeSession(session.current);
+  }, []);
 
-    // Hide header on scroll down, show on scroll up
-    const previousY = lastScrollY.current[panel] ?? 0;
-    const delta = y - previousY;
-    lastScrollY.current[panel] = y;
-    if (delta > 4 && headerVisible.current && y > 60) {
+  // Immediate (rAF-throttled, not debounced) — drives header hide/show in real time
+  const handleScrollImmediate = useCallback((y: number) => {
+    const delta = y - lastScrollY.current;
+    lastScrollY.current = y;
+    if (y <= 60) {
+      // Always show near the top, regardless of direction
+      if (!headerVisible.current) { headerVisible.current = true; setHeaderShown(true); }
+      return;
+    }
+    if (delta > 4 && headerVisible.current) {
       headerVisible.current = false;
       setHeaderShown(false);
     } else if (delta < -4 && !headerVisible.current) {
@@ -1180,10 +1354,13 @@ function XplorePage() {
     }
     session.current = { ...session.current, activePanel: next };
     writeSession(session.current);
-    lastScrollY.current[next] = session.current.scrollPositions[next] ?? 0;
+    setActivePanel(next);
+    // Reset the scroll-direction baseline to the tab we're switching into,
+    // and always show the header on an explicit tab switch — otherwise the
+    // next scroll event compares against the wrong panel's position.
+    lastScrollY.current = session.current.scrollPositions[next] ?? 0;
     headerVisible.current = true;
     setHeaderShown(true);
-    setActivePanel(next);
     // Auto-scroll active tab into centre view
     setTimeout(() => {
       const btn = tabRefs.current[next];
@@ -1229,7 +1406,7 @@ function XplorePage() {
                   <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Xplore</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => { if (!userId) navigate({ to: "/auth" }); else setShowInterests(true); }}
+                  <button onClick={() => { if (!userId) navigate({ to: "/auth" }); else setShowMatches(true); }}
                     className="flex items-center gap-1 rounded-full border border-border px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-primary hover:border-primary transition">
                     <Target className="h-3 w-3" /> Matches
                   </button>
@@ -1359,12 +1536,13 @@ function XplorePage() {
               <div key={id} style={{ transform: `translateX(${offset}%)`, transition: "transform 200ms ease", position: "absolute", inset: 0, pointerEvents: activePanel === id ? "auto" : "none" }}>
                 {id === "jobs" ? (
                   <JobsPanel scrollRef={scrollRefs.jobs} isActive={activePanel === "jobs"}
-                    onScroll={(y) => handleScroll("jobs", y)} userId={userId} interests={interests}
+                    onScroll={(y) => handleScroll("jobs", y)} onScrollImmediate={handleScrollImmediate}
+                    userId={userId} interests={interests}
                     onOpenInterests={() => { if (!userId) navigate({ to: "/auth" }); else setShowInterests(true); }}
                     query={globalQuery} filters={filters} />
                 ) : (
                   <XploreSectionPanel section={id} isActive={activePanel === id}
-                    scrollRef={scrollRefs[id]} onScroll={(y) => handleScroll(id, y)}
+                    scrollRef={scrollRefs[id]} onScroll={(y) => handleScroll(id, y)} onScrollImmediate={handleScrollImmediate}
                     interests={interests} query={globalQuery} userId={userId} filters={filters} />
                 )}
               </div>
@@ -1379,6 +1557,10 @@ function XplorePage() {
       {showInterests && userId && (
         <InterestsPickerModal userId={userId} initialInterests={interests} onClose={() => setShowInterests(false)}
           onSaved={(next) => { setInterests(next); setShowInterests(false); }} />
+      )}
+      {showMatches && userId && (
+        <MatchesModal userId={userId} interests={interests} onClose={() => setShowMatches(false)}
+          onEditInterests={() => { setShowMatches(false); setShowInterests(true); }} />
       )}
       {showPost && (
         <PostModal activePanel={activePanel} userId={userId} onClose={() => setShowPost(false)} onPosted={() => {}} />
