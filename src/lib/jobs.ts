@@ -16,6 +16,8 @@ export interface JobListing {
 }
 
 const STORAGE_KEY = "worldtimeline_jobs";
+const CACHE_KEY = "worldtimeline_jobs_cache"; // external jobs cache (stale-while-revalidate)
+const CACHE_MAX_AGE_MS = 30 * 60 * 1000; // treat cache as usable for 30 min before forcing a blocking fetch
 const GET_JOBS_URL =
   "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/get-jobs";
 
@@ -37,6 +39,35 @@ function writeLocal(jobs: JobListing[]) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(jobs));
   } catch {
     // storage full or unavailable; the new job still shows in this session
+  }
+}
+
+// ---- External jobs cache (stale-while-revalidate) ----
+
+interface ExternalCache {
+  jobs: JobListing[];
+  sources: SourceStatus[];
+  cachedAt: string;
+}
+
+function readCache(): ExternalCache | null {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.jobs)) return null;
+    return parsed as ExternalCache;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(jobs: JobListing[], sources: SourceStatus[]) {
+  try {
+    const cache: ExternalCache = { jobs, sources, cachedAt: new Date().toISOString() };
+    localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // storage full or unavailable; not fatal, next session just refetches
   }
 }
 
@@ -82,6 +113,34 @@ export interface JobsFetchResult {
   jobs: JobListing[];
   lastSyncedAt: string | null;
   sources: SourceStatus[];
+  fromCache: boolean;
+}
+
+async function fetchExternal(): Promise<{ jobs: JobListing[]; sources: SourceStatus[] } | null> {
+  try {
+    const res = await fetch(GET_JOBS_URL, { method: "POST" });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const jobs = Array.isArray(json?.jobs) ? json.jobs.map(normalizeCachedJob) : [];
+    const sources = Array.isArray(json?.sources) ? json.sources : [];
+    return { jobs, sources };
+  } catch {
+    return null;
+  }
+}
+
+function mergeAndSort(community: JobListing[], external: JobListing[]): JobListing[] {
+  return [...community, ...external].sort(
+    (a, b) => new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime()
+  );
+}
+
+function latestSyncTimestamp(sources: SourceStatus[]): string | null {
+  const ts = sources
+    .map((s) => s.lastSyncedAt)
+    .filter((t): t is string => !!t)
+    .map((t) => new Date(t).getTime());
+  return ts.length ? new Date(Math.max(...ts)).toISOString() : null;
 }
 
 /**
@@ -89,43 +148,57 @@ export interface JobsFetchResult {
  * Community jobs live in localStorage until you're ready to move posting
  * server-side too. External jobs (Arbeitnow, RemoteJobs.org, and any future
  * source) come from the Supabase-cached get-jobs edge function, which
- * already merges every cached provider server-side. Both are merged here
- * so jobs.tsx doesn't need to know the difference.
+ * already merges every cached provider server-side.
  *
- * Freshness is reported per-source (`sources`) rather than as one blended
- * number, so this scales cleanly to any number of future job APIs: the UI
- * shows the freshest sync as its headline and only needs to surface a count
- * of anything delayed, not a growing list of timestamps.
+ * ---- CLIENT-SIDE CACHE (stale-while-revalidate) ----
+ * The server-side cache still refreshes hourly, but previously the client
+ * had zero memory of the last successful response — every single mount
+ * blocked on a network round trip and showed "Syncing...". Now the last
+ * successful external-jobs response is cached in localStorage. If that
+ * cache is fresh (< CACHE_MAX_AGE_MS), it's returned immediately with
+ * fromCache: true and a background refresh is kicked off silently. If the
+ * cache is stale or missing, this still blocks on a live fetch as before.
  */
 export async function getJobs(): Promise<JobsFetchResult> {
   const community = readLocal();
-  let external: JobListing[] = [];
-  let sources: SourceStatus[] = [];
+  const cache = readCache();
+  const cacheAge = cache ? Date.now() - new Date(cache.cachedAt).getTime() : Infinity;
 
-  try {
-    const res = await fetch(GET_JOBS_URL, { method: "POST" });
-    if (res.ok) {
-      const json = await res.json();
-      external = Array.isArray(json?.jobs) ? json.jobs.map(normalizeCachedJob) : [];
-      sources = Array.isArray(json?.sources) ? json.sources : [];
-    }
-  } catch {
-    // Network hiccup reaching Supabase; still show community jobs.
+  if (cache && cacheAge < CACHE_MAX_AGE_MS) {
+    // Return cached data instantly; refresh in background without blocking the caller.
+    fetchExternal().then((fresh) => {
+      if (fresh) writeCache(fresh.jobs, fresh.sources);
+    });
+    return {
+      jobs: mergeAndSort(community, cache.jobs),
+      lastSyncedAt: latestSyncTimestamp(cache.sources),
+      sources: cache.sources,
+      fromCache: true,
+    };
   }
 
-  const merged = [...community, ...external].sort(
-    (a, b) => new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime()
-  );
+  const fresh = await fetchExternal();
+  if (fresh) {
+    writeCache(fresh.jobs, fresh.sources);
+    return {
+      jobs: mergeAndSort(community, fresh.jobs),
+      lastSyncedAt: latestSyncTimestamp(fresh.sources),
+      sources: fresh.sources,
+      fromCache: false,
+    };
+  }
 
-  const syncedTimestamps = sources
-    .map((s) => s.lastSyncedAt)
-    .filter((t): t is string => !!t)
-    .map((t) => new Date(t).getTime());
-  const lastSyncedAt = syncedTimestamps.length
-    ? new Date(Math.max(...syncedTimestamps)).toISOString()
-    : null;
+  // Network failed entirely — fall back to whatever cache exists, however stale.
+  if (cache) {
+    return {
+      jobs: mergeAndSort(community, cache.jobs),
+      lastSyncedAt: latestSyncTimestamp(cache.sources),
+      sources: cache.sources,
+      fromCache: true,
+    };
+  }
 
-  return { jobs: merged, lastSyncedAt, sources };
+  return { jobs: community, lastSyncedAt: null, sources: [], fromCache: false };
 }
 
 export async function postJob(
