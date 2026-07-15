@@ -23,9 +23,9 @@ export async function getCurrentUserId(): Promise<string | null> {
 /**
  * ---- REUSABLE PATTERN NOTE ----
  * All engagement here is per-user via Supabase auth (auth.uid()), enforced
- * by RLS policies on job_comments / job_reactions / job_views / job_reports.
- * Counts are read from the job_engagement_counts view for efficiency across
- * a whole feed rather than per-card round trips.
+ * by RLS policies on job_comments / job_reactions / job_views / job_reports /
+ * job_comment_likes. Counts are read from the job_engagement_counts view for
+ * efficiency across a whole feed rather than per-card round trips.
  */
 
 export async function getEngagementCounts(
@@ -125,4 +125,52 @@ export async function reportJob(
   reason: string
 ): Promise<void> {
   await supabase.from("job_reports").insert({ job_id: jobId, user_id: userId, reason });
+}
+
+// ─── Comment likes ─────────────────────────────────────────────────────────
+
+export async function getCommentLikeCounts(
+  commentIds: string[]
+): Promise<Record<string, number>> {
+  if (commentIds.length === 0) return {};
+  const { data } = await supabase
+    .from("job_comment_likes")
+    .select("comment_id")
+    .in("comment_id", commentIds);
+  const map: Record<string, number> = {};
+  for (const row of (data ?? []) as { comment_id: string }[]) {
+    map[row.comment_id] = (map[row.comment_id] ?? 0) + 1;
+  }
+  return map;
+}
+
+export async function getMyCommentLikes(
+  commentIds: string[],
+  userId: string
+): Promise<Set<string>> {
+  if (commentIds.length === 0) return new Set();
+  const { data } = await supabase
+    .from("job_comment_likes")
+    .select("comment_id")
+    .eq("user_id", userId)
+    .in("comment_id", commentIds);
+  return new Set((data ?? []).map((r: { comment_id: string }) => r.comment_id));
+}
+
+export async function toggleCommentLike(
+  commentId: string,
+  userId: string,
+  currentlyLiked: boolean
+): Promise<void> {
+  if (currentlyLiked) {
+    await supabase
+      .from("job_comment_likes")
+      .delete()
+      .eq("comment_id", commentId)
+      .eq("user_id", userId);
+  } else {
+    await supabase
+      .from("job_comment_likes")
+      .upsert({ comment_id: commentId, user_id: userId }, { onConflict: "comment_id,user_id" });
+  }
 }
