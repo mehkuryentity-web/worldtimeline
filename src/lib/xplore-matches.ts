@@ -127,7 +127,6 @@ const INTEREST_SYNONYMS: Record<string, string[]> = {
 
 // ─── Match types ──────────────────────────────────────────────────────────────
 
-export type MatchScore = "strong" | "possible";
 export type XploreCategory = "jobs" | "internships" | "scholarships" | "grants";
 
 export interface XploreMatch {
@@ -135,7 +134,8 @@ export interface XploreMatch {
   itemTitle: string;
   matchedInterest: string;
   matchedKeyword: string;
-  score: MatchScore;
+  scorePercent: number; // 0–100, ranking signal — not a filter category
+  matchedInterests: string[];
   category: XploreCategory;
 }
 
@@ -143,87 +143,104 @@ export interface JobMatch {
   job: JobListing;
   matchedInterest: string;
   matchedKeyword: string;
-  score: MatchScore;
+  scorePercent: number; // 0–100, ranking signal — not a filter category
+  matchedInterests: string[];
 }
 
 // ─── Scoring ──────────────────────────────────────────────────────────────────
+// Weighted percentage model: each interest that matches an item contributes
+// points based on WHERE it matched (title is the strongest signal, tags next,
+// description weakest). Points from distinct matching interests stack,
+// capped at 100. This replaces the old binary strong/possible flag with a
+// real ranking signal so "Matches" can sort by relevance, not just filter.
 
-function scoreText(text: string, interest: string): { fieldsHit: number; keyword: string } {
-  const lower = text.toLowerCase();
-  const keywords = [interest, ...(INTEREST_SYNONYMS[interest] ?? [])];
-  let fieldsHit = 0;
-  let matchedKeyword = "";
-  for (const kw of keywords) {
-    const k = kw.toLowerCase();
-    if (lower.includes(k)) {
-      fieldsHit++;
-      if (!matchedKeyword) matchedKeyword = kw;
-    }
-  }
-  return { fieldsHit, keyword: matchedKeyword };
+const FIELD_WEIGHT = { title: 45, tag: 30, description: 20 } as const;
+
+function keywordsFor(interest: string): string[] {
+  return [interest, ...(INTEREST_SYNONYMS[interest] ?? [])].map((k) => k.toLowerCase());
 }
 
-// Score a generic xplore item (title + description) against an interest
+// Best single-field weight this interest earns against a job (title > tags > description)
+function jobInterestWeight(job: JobListing, interest: string): { weight: number; keyword: string } {
+  const title = job.title.toLowerCase();
+  const tags = (job.tags ?? []).map((t) => t.toLowerCase());
+  const desc = (job.description ?? "").toLowerCase();
+  let weight = 0;
+  let keyword = "";
+  for (const kw of keywordsFor(interest)) {
+    if (title.includes(kw) && FIELD_WEIGHT.title > weight) { weight = FIELD_WEIGHT.title; keyword = kw; }
+    else if (tags.some((t) => t.includes(kw)) && FIELD_WEIGHT.tag > weight) { weight = FIELD_WEIGHT.tag; keyword = kw; }
+    else if (desc.includes(kw) && FIELD_WEIGHT.description > weight) { weight = FIELD_WEIGHT.description; keyword = kw; }
+  }
+  return { weight, keyword };
+}
+
+// Best single-field weight this interest earns against a generic xplore item (title > description)
+function xploreInterestWeight(
+  title: string, description: string | null, interest: string
+): { weight: number; keyword: string } {
+  const t = title.toLowerCase();
+  const d = (description ?? "").toLowerCase();
+  let weight = 0;
+  let keyword = "";
+  for (const kw of keywordsFor(interest)) {
+    if (t.includes(kw) && FIELD_WEIGHT.title > weight) { weight = FIELD_WEIGHT.title; keyword = kw; }
+    else if (d.includes(kw) && FIELD_WEIGHT.description > weight) { weight = FIELD_WEIGHT.description; keyword = kw; }
+  }
+  return { weight, keyword };
+}
+
+// Score a generic xplore item against ALL relevant interests, returning a 0-100 percentage
 export function scoreXploreItem(
   title: string,
   description: string | null,
-  interest: string
-): { score: MatchScore | null; keyword: string } {
-  const titleResult = scoreText(title, interest);
-  const descResult = description ? scoreText(description, interest) : { fieldsHit: 0, keyword: "" };
-  const totalHits = titleResult.fieldsHit + (descResult.fieldsHit > 0 ? 1 : 0);
-  if (totalHits === 0) return { score: null, keyword: "" };
-  return {
-    score: totalHits >= 2 ? "strong" : "possible",
-    keyword: titleResult.keyword || descResult.keyword,
-  };
-}
-
-// Original job matching (backward compat with JobCard)
-function scoreAgainstInterest(
-  job: JobListing,
-  interest: string
-): { fieldsHit: number; keyword: string } {
-  const title = job.title.toLowerCase();
-  const tags = (job.tags ?? []).map((t) => t.toLowerCase());
-  const keywords = [interest, ...(INTEREST_SYNONYMS[interest] ?? [])];
-  let fieldsHit = 0;
-  let matchedKeyword = "";
-  for (const kw of keywords) {
-    const k = kw.toLowerCase();
-    const inTitle = title.includes(k);
-    const inTags = tags.some((t) => t.includes(k));
-    if (inTitle) fieldsHit++;
-    if (inTags) fieldsHit++;
-    if ((inTitle || inTags) && !matchedKeyword) matchedKeyword = kw;
+  candidateInterests: string[]
+): { scorePercent: number; topInterest: string; matchedInterests: string[] } {
+  let total = 0;
+  let topInterest = "";
+  let topWeight = 0;
+  const matched: string[] = [];
+  for (const interest of candidateInterests) {
+    const { weight } = xploreInterestWeight(title, description, interest);
+    if (weight > 0) {
+      total += weight;
+      matched.push(interest);
+      if (weight > topWeight) { topWeight = weight; topInterest = interest; }
+    }
   }
-  return { fieldsHit, keyword: matchedKeyword };
+  return { scorePercent: Math.min(100, total), topInterest, matchedInterests: matched };
 }
 
-export function scoreMatch(job: JobListing, interest: string): MatchScore | null {
-  const { fieldsHit } = scoreAgainstInterest(job, interest);
-  if (fieldsHit === 0) return null;
-  return fieldsHit >= 2 ? "strong" : "possible";
+// Score a job against ALL relevant interests, returning a 0-100 percentage
+export function scoreJob(
+  job: JobListing,
+  candidateInterests: string[]
+): { scorePercent: number; topInterest: string; matchedInterests: string[] } {
+  let total = 0;
+  let topInterest = "";
+  let topWeight = 0;
+  const matched: string[] = [];
+  for (const interest of candidateInterests) {
+    const { weight } = jobInterestWeight(job, interest);
+    if (weight > 0) {
+      total += weight;
+      matched.push(interest);
+      if (weight > topWeight) { topWeight = weight; topInterest = interest; }
+    }
+  }
+  return { scorePercent: Math.min(100, total), topInterest, matchedInterests: matched };
 }
 
 export function computeMatches(jobs: JobListing[], interests: string[]): JobMatch[] {
   if (interests.length === 0) return [];
   const matches: JobMatch[] = [];
   for (const job of jobs) {
-    for (const interest of interests) {
-      const { fieldsHit, keyword } = scoreAgainstInterest(job, interest);
-      if (fieldsHit > 0) {
-        matches.push({
-          job,
-          matchedInterest: interest,
-          matchedKeyword: keyword || interest,
-          score: fieldsHit >= 2 ? "strong" : "possible",
-        });
-        break;
-      }
+    const { scorePercent, topInterest, matchedInterests } = scoreJob(job, interests);
+    if (scorePercent > 0) {
+      matches.push({ job, matchedInterest: topInterest, matchedKeyword: topInterest, scorePercent, matchedInterests });
     }
   }
-  return matches;
+  return matches.sort((a, b) => b.scorePercent - a.scorePercent);
 }
 
 // Match xplore items (scholarships/grants/internships) against interests
@@ -233,30 +250,20 @@ export function computeXploreMatches(
   category: XploreCategory
 ): XploreMatch[] {
   if (interests.length === 0) return [];
-  // Only match interests relevant to this category
-  const categoryInterests = interests.filter((i) =>
-    categoriesForKeyword(i).includes(category)
-  );
-  // Fallback: if no category-specific interests, use all interests
+  // Only score interests relevant to this category
+  const categoryInterests = interests.filter((i) => categoriesForKeyword(i).includes(category));
   const activeInterests = categoryInterests.length > 0 ? categoryInterests : interests;
   const matches: XploreMatch[] = [];
   for (const item of items) {
-    for (const interest of activeInterests) {
-      const { score, keyword } = scoreXploreItem(item.title, item.description, interest);
-      if (score) {
-        matches.push({
-          itemId: item.id,
-          itemTitle: item.title,
-          matchedInterest: interest,
-          matchedKeyword: keyword || interest,
-          score,
-          category,
-        });
-        break;
-      }
+    const { scorePercent, topInterest, matchedInterests } = scoreXploreItem(item.title, item.description, activeInterests);
+    if (scorePercent > 0) {
+      matches.push({
+        itemId: item.id, itemTitle: item.title, matchedInterest: topInterest,
+        matchedKeyword: topInterest, scorePercent, matchedInterests, category,
+      });
     }
   }
-  return matches;
+  return matches.sort((a, b) => b.scorePercent - a.scorePercent);
 }
 
 // ─── Supabase persistence ─────────────────────────────────────────────────────
@@ -295,7 +302,7 @@ export async function syncMatches(userId: string, matches: JobMatch[]): Promise<
     job_id: m.job.id,
     matched_interest: m.matchedInterest,
     matched_keyword: m.matchedKeyword,
-    match_score: m.score,
+    match_score: String(m.scorePercent),
     job_title: m.job.title,
     job_company: m.job.company,
     job_apply_url: m.job.applyUrl,
@@ -326,7 +333,7 @@ export async function getMatchHistory(userId: string) {
     jobType: (r.job_type as string) ?? "",
     matchedInterest: r.matched_interest as string,
     matchedKeyword: (r.matched_keyword as string) ?? (r.matched_interest as string),
-    score: (r.match_score as MatchScore) ?? null,
+    scorePercent: Number(r.match_score) || 0,
     createdAt: r.created_at as string,
     seen: r.seen as boolean,
   }));
