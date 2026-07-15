@@ -1077,8 +1077,8 @@ function MatchesModal({ userId, interests, onClose, onEditInterests }: {
     });
   };
 
-  const filteredMatches = activeFilter === "all" ? matches : matches.filter((m) => m.category === activeFilter);
   const countByCategory = (cat: PanelId) => matches.filter((m) => m.category === cat).length;
+  const visibleCount = activeFilter === "all" ? matches.length : countByCategory(activeFilter);
 
   const switchFilter = (next: "all" | PanelId) => {
     setActiveFilter(next);
@@ -1144,26 +1144,35 @@ function MatchesModal({ userId, interests, onClose, onEditInterests }: {
           </div>
         ) : loading && matches.length === 0 ? (
           <MatchesPreloader status={categoryStatus} />
-        ) : filteredMatches.length === 0 ? (
+        ) : visibleCount === 0 ? (
           <div className="mt-6 rounded-xl border border-dashed border-border bg-surface-1 p-8 text-center">
             <Globe className="mx-auto h-8 w-8 text-muted-foreground mb-3" />
             <p className="text-sm text-muted-foreground">No matches yet in this category. Check back after the next sync.</p>
           </div>
         ) : (
           <div className="mt-3 space-y-2">
-            {filteredMatches.map((m) =>
-              m.job ? (
-                <InlineJobCard key={m.key} job={m.job} userId={userId} counts={engagementMap[m.job.id]}
-                  interested={myReactions.has(m.job.id)} isSaved={!!appState.saved?.[m.job.id]}
-                  match={{ job: m.job, matchedInterest: m.matchedInterest, matchedKeyword: m.matchedInterest, scorePercent: m.scorePercent, matchedInterests: [m.matchedInterest] }}
-                  onCountsChange={handleCountsChange} onInterestedChange={handleInterestedChange} onToggleSave={handleToggleSaveJob} />
-              ) : m.xploreItem ? (
-                <XploreCard key={m.key} item={m.xploreItem} section={m.category as Exclude<PanelId, "jobs">}
-                  saved={!!saved[m.xploreItem.id]} onSave={(i) => setSaved(toggleSavedItem(i))}
-                  match={{ itemId: m.xploreItem.id, itemTitle: m.xploreItem.title, matchedInterest: m.matchedInterest, matchedKeyword: m.matchedInterest, scorePercent: m.scorePercent, matchedInterests: [m.matchedInterest], category: m.category as XploreCategory }}
-                  userId={userId} />
-              ) : null
-            )}
+            {matches.map((m) => {
+              // Every card mounts once and stays mounted — switching the filter only
+              // toggles visibility. Unmounting on swipe was the actual cause of the
+              // glitchy delay: XploreCard re-fetches its own engagement data on every
+              // mount, so filtering the array meant re-fetching on every swipe.
+              const visible = activeFilter === "all" || m.category === activeFilter;
+              return (
+                <div key={m.key} className={visible ? "" : "hidden"}>
+                  {m.job ? (
+                    <InlineJobCard job={m.job} userId={userId} counts={engagementMap[m.job.id]}
+                      interested={myReactions.has(m.job.id)} isSaved={!!appState.saved?.[m.job.id]}
+                      match={{ job: m.job, matchedInterest: m.matchedInterest, matchedKeyword: m.matchedInterest, scorePercent: m.scorePercent, matchedInterests: [m.matchedInterest] }}
+                      onCountsChange={handleCountsChange} onInterestedChange={handleInterestedChange} onToggleSave={handleToggleSaveJob} />
+                  ) : m.xploreItem ? (
+                    <XploreCard item={m.xploreItem} section={m.category as Exclude<PanelId, "jobs">}
+                      saved={!!saved[m.xploreItem.id]} onSave={(i) => setSaved(toggleSavedItem(i))}
+                      match={{ itemId: m.xploreItem.id, itemTitle: m.xploreItem.title, matchedInterest: m.matchedInterest, matchedKeyword: m.matchedInterest, scorePercent: m.scorePercent, matchedInterests: [m.matchedInterest], category: m.category as XploreCategory }}
+                      userId={userId} />
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
