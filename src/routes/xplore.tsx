@@ -213,6 +213,44 @@ async function fetchSection(type: Exclude<PanelId, "jobs">, page = 1): Promise<X
   }
 }
 
+// ─── Matches cache (stale-while-revalidate, same pattern as fetchSection) ────
+// Recomputing matches means hitting jobs + 3 xplore categories every time the
+// modal opens. Caching the *computed* match list (not just the raw listings)
+// means a reopen renders instantly, then quietly refreshes in the background.
+const MATCHES_CACHE_PREFIX = "xplore_matches_cache_";
+const MATCHES_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
+
+function hashInterests(interests: string[]): string {
+  const s = [...interests].sort().join("|");
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h).toString(36);
+}
+
+function matchesCacheKey(userId: string, interests: string[]) {
+  return `${MATCHES_CACHE_PREFIX}${userId}_${hashInterests(interests)}`;
+}
+
+function readMatchesCache(userId: string, interests: string[]): { data: UnifiedMatch[]; cachedAt: string } | null {
+  try {
+    const raw = localStorage.getItem(matchesCacheKey(userId, interests));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed?.data)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeMatchesCache(userId: string, interests: string[], data: UnifiedMatch[]) {
+  try {
+    localStorage.setItem(matchesCacheKey(userId, interests), JSON.stringify({ data, cachedAt: new Date().toISOString() }));
+  } catch {
+    // storage full or unavailable; not fatal, next open just recomputes
+  }
+}
+
 // ─── Interests Picker Modal ───────────────────────────────────────────────────
 
 function InterestsPickerModal({
@@ -889,65 +927,140 @@ interface UnifiedMatch {
   xploreItem?: XploreItem;
 }
 
+type CategoryStatus = "pending" | "done" | "error";
+const EMPTY_STATUS: Record<PanelId, CategoryStatus> = { jobs: "pending", internships: "pending", scholarships: "pending", grants: "pending" };
+
+// A themed "radar" preloader for the one moment caching can't help — the very
+// first time a person opens Matches with no cache yet. Pulses out from the
+// Target icon like a scan, and names whichever category is still in flight
+// instead of a generic spinner or stale-looking blank space.
+function MatchesPreloader({ status }: { status: Record<PanelId, CategoryStatus> }) {
+  const [cycle, setCycle] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => setCycle((c) => c + 1), 1300);
+    return () => clearInterval(id);
+  }, []);
+
+  const pending = PANELS.filter((p) => status[p.id] === "pending");
+  const activeLabel = pending.length > 0 ? pending[cycle % pending.length].label.toLowerCase() : "everything";
+
+  return (
+    <div className="mt-8 flex flex-col items-center">
+      <div className="relative h-16 w-16 flex-shrink-0">
+        <span className="absolute inset-0 rounded-full border-2 border-primary/40 animate-ping" />
+        <span className="absolute inset-2 rounded-full border-2 border-primary/30 animate-ping [animation-delay:250ms]" />
+        <span className="absolute inset-4 rounded-full border-2 border-primary/20 animate-ping [animation-delay:500ms]" />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <Target className="h-6 w-6 text-primary" />
+        </div>
+      </div>
+
+      <p className="mt-4 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+        Scanning <span className="text-primary">{activeLabel}</span> for your matches&hellip;
+      </p>
+
+      <div className="mt-2 flex gap-1.5">
+        {PANELS.map((p) => (
+          <span key={p.id} className={`h-1.5 w-1.5 rounded-full transition-colors ${
+            status[p.id] === "done" ? "bg-primary" : status[p.id] === "error" ? "bg-destructive/40" : "bg-border animate-pulse"
+          }`} />
+        ))}
+      </div>
+
+      <div className="mt-6 w-full space-y-2">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="h-28 rounded-xl bg-surface-1 border border-border animate-pulse" style={{ animationDelay: `${i * 120}ms` }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MatchesModal({ userId, interests, onClose, onEditInterests }: {
   userId: string; interests: string[]; onClose: () => void; onEditInterests: () => void;
 }) {
   const { update: updateAppState, state: appState } = useAppState();
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [categoryStatus, setCategoryStatus] = useState<Record<PanelId, CategoryStatus>>(EMPTY_STATUS);
   const [matches, setMatches] = useState<UnifiedMatch[]>([]);
   const [engagementMap, setEngagementMap] = useState<Record<string, EngagementCounts>>({});
   const [myReactions, setMyReactions] = useState<Set<string>>(new Set());
   const [saved, setSaved] = useState<Record<string, XploreItem>>(getSaved);
   const [activeFilter, setActiveFilter] = useState<"all" | PanelId>("all");
   const loaded = useRef(false);
+  const filterOrder = useMemo(() => ["all", ...PANELS.map((p) => p.id)] as ("all" | PanelId)[], []);
+  const filterTabRefs = useRef<Partial<Record<string, HTMLButtonElement>>>({});
+  const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
 
   useEffect(() => {
     if (loaded.current) return;
     loaded.current = true;
     if (interests.length === 0) { setLoading(false); return; }
 
-    (async () => {
-      const [jobsResult, internships, scholarships, grants] = await Promise.all([
-        getJobs(),
-        fetchSection("internships").catch(() => ({ items: [] } as Partial<XploreResponse>)),
-        fetchSection("scholarships").catch(() => ({ items: [] } as Partial<XploreResponse>)),
-        fetchSection("grants").catch(() => ({ items: [] } as Partial<XploreResponse>)),
-      ]);
-
-      const jobMatches = computeMatches(jobsResult.jobs, interests);
-      const unified: UnifiedMatch[] = jobMatches.map((m) => ({
-        key: `jobs_${m.job.id}`, category: "jobs", scorePercent: m.scorePercent, matchedInterest: m.matchedInterest, job: m.job,
-      }));
-
-      for (const [cat, items] of [
-        ["internships", internships.items ?? []],
-        ["scholarships", scholarships.items ?? []],
-        ["grants", grants.items ?? []],
-      ] as [XploreCategory, XploreItem[]][]) {
-        const catMatches = computeXploreMatches(items, interests, cat);
-        for (const m of catMatches) {
-          const item = items.find((i) => i.id === m.itemId);
-          if (item) unified.push({ key: `${cat}_${item.id}`, category: cat, scorePercent: m.scorePercent, matchedInterest: m.matchedInterest, xploreItem: item });
-        }
-      }
-
-      // Highest match percentage first
-      unified.sort((a, b) => b.scorePercent - a.scorePercent);
-      setMatches(unified);
-
-      // Load engagement for job matches only (xplore cards load their own internally)
-      const jobIds = unified.filter((m) => m.job).map((m) => m.job!.id);
-      if (jobIds.length > 0) {
-        const [counts, mine] = await Promise.all([
-          getEngagementCounts(jobIds),
-          userId ? getMyReactions(jobIds, userId) : Promise.resolve(new Set<string>()),
-        ]);
-        setEngagementMap(counts);
-        setMyReactions(mine);
-      }
+    // Instant paint from cache (if any), then quietly refresh underneath.
+    const cached = userId ? readMatchesCache(userId, interests) : null;
+    if (cached) {
+      const cacheAge = Date.now() - new Date(cached.cachedAt).getTime();
+      setMatches(cached.data);
       setLoading(false);
-    })();
+      // Only surface "refreshing…" for stale cache — fresh cache refreshes silently.
+      setRefreshing(cacheAge >= MATCHES_CACHE_MAX_AGE_MS);
+    }
+
+    const collected: UnifiedMatch[] = [];
+    const commit = () => {
+      const sorted = [...collected].sort((a, b) => b.scorePercent - a.scorePercent);
+      setMatches(sorted);
+      setLoading(false);
+      if (userId) writeMatchesCache(userId, interests, sorted);
+    };
+
+    getJobs()
+      .then((jobsResult) => {
+        const jobMatches = computeMatches(jobsResult.jobs, interests);
+        collected.push(...jobMatches.map((m) => ({
+          key: `jobs_${m.job.id}`, category: "jobs" as PanelId, scorePercent: m.scorePercent, matchedInterest: m.matchedInterest, job: m.job,
+        })));
+        setCategoryStatus((s) => ({ ...s, jobs: "done" }));
+        commit();
+
+        // Engagement for job matches only (xplore cards load their own internally) — non-blocking.
+        const jobIds = jobMatches.map((m) => m.job.id);
+        if (jobIds.length > 0) {
+          Promise.all([
+            getEngagementCounts(jobIds),
+            userId ? getMyReactions(jobIds, userId) : Promise.resolve(new Set<string>()),
+          ]).then(([counts, mine]) => {
+            setEngagementMap((prev) => ({ ...prev, ...counts }));
+            setMyReactions(mine);
+          }).catch(() => {});
+        }
+      })
+      .catch(() => setCategoryStatus((s) => ({ ...s, jobs: "error" })));
+
+    (["internships", "scholarships", "grants"] as XploreCategory[]).forEach((cat) => {
+      fetchSection(cat)
+        .then((res) => {
+          const items = res.items ?? [];
+          const catMatches = computeXploreMatches(items, interests, cat);
+          for (const m of catMatches) {
+            const item = items.find((i) => i.id === m.itemId);
+            if (item) collected.push({ key: `${cat}_${item.id}`, category: cat, scorePercent: m.scorePercent, matchedInterest: m.matchedInterest, xploreItem: item });
+          }
+          setCategoryStatus((s) => ({ ...s, [cat]: "done" }));
+          commit();
+        })
+        .catch(() => setCategoryStatus((s) => ({ ...s, [cat]: "error" })));
+    });
   }, [interests, userId]);
+
+  // Once every category has settled, the background refresh (if any) is done.
+  useEffect(() => {
+    if (PANELS.every((p) => categoryStatus[p.id] !== "pending")) setRefreshing(false);
+  }, [categoryStatus]);
 
   const handleCountsChange = (jobId: string, updater: (c: EngagementCounts) => EngagementCounts) => {
     setEngagementMap((prev) => ({ ...prev, [jobId]: updater(prev[jobId] ?? { interestedCount: 0, viewCount: 0, commentCount: 0 }) }));
@@ -967,12 +1080,38 @@ function MatchesModal({ userId, interests, onClose, onEditInterests }: {
   const filteredMatches = activeFilter === "all" ? matches : matches.filter((m) => m.category === activeFilter);
   const countByCategory = (cat: PanelId) => matches.filter((m) => m.category === cat).length;
 
+  const switchFilter = (next: "all" | PanelId) => {
+    setActiveFilter(next);
+    setTimeout(() => {
+      const btn = filterTabRefs.current[next];
+      if (btn) btn.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    }, 50);
+  };
+
+  // Swipe left/right through category filters, same gesture as the Xplore tab bar.
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null || touchStartY.current === null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    const dy = e.changedTouches[0].clientY - touchStartY.current;
+    touchStartX.current = null; touchStartY.current = null;
+    if (Math.abs(dy) > Math.abs(dx) || Math.abs(dx) < 60) return;
+    const idx = filterOrder.indexOf(activeFilter);
+    if (dx > 0 && idx > 0) switchFilter(filterOrder[idx - 1]);
+    if (dx < 0 && idx < filterOrder.length - 1) switchFilter(filterOrder[idx + 1]);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
       <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-border flex-shrink-0">
         <div>
           <h2 className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider font-semibold"><Target className="h-4 w-4 text-primary" /> Your Matches</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{matches.length} matches across all categories</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {matches.length} matches across all categories{refreshing ? " · refreshing…" : ""}
+          </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <button onClick={onEditInterests}
@@ -985,8 +1124,8 @@ function MatchesModal({ userId, interests, onClose, onEditInterests }: {
 
       {interests.length > 0 && (
         <div className="flex gap-1.5 px-4 pt-3 pb-2 flex-shrink-0 overflow-x-auto no-scrollbar">
-          {(["all", ...PANELS.map((p) => p.id)] as ("all" | PanelId)[]).map((f) => (
-            <button key={f} onClick={() => setActiveFilter(f)}
+          {filterOrder.map((f) => (
+            <button key={f} ref={(el) => { if (el) filterTabRefs.current[f] = el; }} onClick={() => switchFilter(f)}
               className={`flex-shrink-0 rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition whitespace-nowrap ${
                 activeFilter === f ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground"
               }`}>
@@ -996,17 +1135,15 @@ function MatchesModal({ userId, interests, onClose, onEditInterests }: {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto px-4 pb-6">
+      <div className="flex-1 overflow-y-auto px-4 pb-6" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
         {interests.length === 0 ? (
           <div className="mt-6 rounded-xl border border-dashed border-border bg-surface-1 p-8 text-center">
             <Target className="mx-auto h-8 w-8 text-muted-foreground mb-3" />
             <p className="text-sm text-muted-foreground mb-3">Set your interests to see curated matches across jobs, internships, scholarships & grants.</p>
             <button onClick={onEditInterests} className="rounded-md bg-primary px-4 py-2 font-mono text-xs uppercase tracking-wider text-primary-foreground">Set interests</button>
           </div>
-        ) : loading ? (
-          <div className="mt-3 space-y-2">
-            {[...Array(4)].map((_, i) => <div key={i} className="h-28 rounded-xl bg-surface-1 border border-border animate-pulse" />)}
-          </div>
+        ) : loading && matches.length === 0 ? (
+          <MatchesPreloader status={categoryStatus} />
         ) : filteredMatches.length === 0 ? (
           <div className="mt-6 rounded-xl border border-dashed border-border bg-surface-1 p-8 text-center">
             <Globe className="mx-auto h-8 w-8 text-muted-foreground mb-3" />
