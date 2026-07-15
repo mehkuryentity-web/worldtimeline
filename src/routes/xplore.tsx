@@ -1131,7 +1131,7 @@ function XplorePage() {
   const tabBarRef = useRef<HTMLDivElement>(null);
   const tabRefs = useRef<Partial<Record<PanelId, HTMLButtonElement>>>({});
   const headerRef = useRef<HTMLDivElement>(null);
-  const lastScrollY = useRef(0);
+  const lastScrollY = useRef<Record<PanelId, number>>({ jobs: 0, internships: 0, scholarships: 0, grants: 0 });
   const headerVisible = useRef(true);
   const [headerShown, setHeaderShown] = useState(true);
   const [headerHeight, setHeaderHeight] = useState(999);
@@ -1161,8 +1161,9 @@ function XplorePage() {
     writeSession(session.current);
 
     // Hide header on scroll down, show on scroll up
-    const delta = y - lastScrollY.current;
-    lastScrollY.current = y;
+    const previousY = lastScrollY.current[panel] ?? 0;
+    const delta = y - previousY;
+    lastScrollY.current[panel] = y;
     if (delta > 4 && headerVisible.current && y > 60) {
       headerVisible.current = false;
       setHeaderShown(false);
@@ -1179,6 +1180,9 @@ function XplorePage() {
     }
     session.current = { ...session.current, activePanel: next };
     writeSession(session.current);
+    lastScrollY.current[next] = session.current.scrollPositions[next] ?? 0;
+    headerVisible.current = true;
+    setHeaderShown(true);
     setActivePanel(next);
     // Auto-scroll active tab into centre view
     setTimeout(() => {
