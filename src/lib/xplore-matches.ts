@@ -156,36 +156,55 @@ export interface JobMatch {
 
 const FIELD_WEIGHT = { title: 45, tag: 30, description: 20 } as const;
 
+// Synonym lookup is static (INTEREST_SYNONYMS never changes at runtime), but was being
+// rebuilt and re-lowercased from scratch on every single call — once per interest, per
+// job, per category. Memoizing it turns that into a one-time cost per interest.
+const keywordsCache = new Map<string, string[]>();
 function keywordsFor(interest: string): string[] {
-  return [interest, ...(INTEREST_SYNONYMS[interest] ?? [])].map((k) => k.toLowerCase());
+  let cached = keywordsCache.get(interest);
+  if (!cached) {
+    cached = [interest, ...(INTEREST_SYNONYMS[interest] ?? [])].map((k) => k.toLowerCase());
+    keywordsCache.set(interest, cached);
+  }
+  return cached;
 }
 
-// Best single-field weight this interest earns against a job (title > tags > description)
-function jobInterestWeight(job: JobListing, interest: string): { weight: number; keyword: string } {
-  const title = job.title.toLowerCase();
-  const tags = (job.tags ?? []).map((t) => t.toLowerCase());
-  const desc = (job.description ?? "").toLowerCase();
+// Lowercasing a job's title/tags/description used to happen inside jobInterestWeight,
+// which ran once PER INTEREST — so a job matched against 8 interests re-lowercased the
+// same strings 8 times. Normalizing once per job (here) and reusing it across the
+// interest loop removes that redundant work entirely.
+interface NormalizedJobText { title: string; tags: string[]; desc: string }
+function normalizeJobText(job: JobListing): NormalizedJobText {
+  return {
+    title: job.title.toLowerCase(),
+    tags: (job.tags ?? []).map((t) => t.toLowerCase()),
+    desc: (job.description ?? "").toLowerCase(),
+  };
+}
+
+function jobInterestWeightNormalized(norm: NormalizedJobText, interest: string): { weight: number; keyword: string } {
   let weight = 0;
   let keyword = "";
   for (const kw of keywordsFor(interest)) {
-    if (title.includes(kw) && FIELD_WEIGHT.title > weight) { weight = FIELD_WEIGHT.title; keyword = kw; }
-    else if (tags.some((t) => t.includes(kw)) && FIELD_WEIGHT.tag > weight) { weight = FIELD_WEIGHT.tag; keyword = kw; }
-    else if (desc.includes(kw) && FIELD_WEIGHT.description > weight) { weight = FIELD_WEIGHT.description; keyword = kw; }
+    if (norm.title.includes(kw) && FIELD_WEIGHT.title > weight) { weight = FIELD_WEIGHT.title; keyword = kw; }
+    else if (norm.tags.some((t) => t.includes(kw)) && FIELD_WEIGHT.tag > weight) { weight = FIELD_WEIGHT.tag; keyword = kw; }
+    else if (norm.desc.includes(kw) && FIELD_WEIGHT.description > weight) { weight = FIELD_WEIGHT.description; keyword = kw; }
   }
   return { weight, keyword };
 }
 
-// Best single-field weight this interest earns against a generic xplore item (title > description)
-function xploreInterestWeight(
-  title: string, description: string | null, interest: string
-): { weight: number; keyword: string } {
-  const t = title.toLowerCase();
-  const d = (description ?? "").toLowerCase();
+// Same normalize-once-per-item fix for xplore items (internships/scholarships/grants).
+interface NormalizedXploreText { t: string; d: string }
+function normalizeXploreText(title: string, description: string | null): NormalizedXploreText {
+  return { t: title.toLowerCase(), d: (description ?? "").toLowerCase() };
+}
+
+function xploreInterestWeightNormalized(norm: NormalizedXploreText, interest: string): { weight: number; keyword: string } {
   let weight = 0;
   let keyword = "";
   for (const kw of keywordsFor(interest)) {
-    if (t.includes(kw) && FIELD_WEIGHT.title > weight) { weight = FIELD_WEIGHT.title; keyword = kw; }
-    else if (d.includes(kw) && FIELD_WEIGHT.description > weight) { weight = FIELD_WEIGHT.description; keyword = kw; }
+    if (norm.t.includes(kw) && FIELD_WEIGHT.title > weight) { weight = FIELD_WEIGHT.title; keyword = kw; }
+    else if (norm.d.includes(kw) && FIELD_WEIGHT.description > weight) { weight = FIELD_WEIGHT.description; keyword = kw; }
   }
   return { weight, keyword };
 }
@@ -196,12 +215,13 @@ export function scoreXploreItem(
   description: string | null,
   candidateInterests: string[]
 ): { scorePercent: number; topInterest: string; matchedInterests: string[] } {
+  const norm = normalizeXploreText(title, description);
   let total = 0;
   let topInterest = "";
   let topWeight = 0;
   const matched: string[] = [];
   for (const interest of candidateInterests) {
-    const { weight } = xploreInterestWeight(title, description, interest);
+    const { weight } = xploreInterestWeightNormalized(norm, interest);
     if (weight > 0) {
       total += weight;
       matched.push(interest);
@@ -216,12 +236,13 @@ export function scoreJob(
   job: JobListing,
   candidateInterests: string[]
 ): { scorePercent: number; topInterest: string; matchedInterests: string[] } {
+  const norm = normalizeJobText(job);
   let total = 0;
   let topInterest = "";
   let topWeight = 0;
   const matched: string[] = [];
   for (const interest of candidateInterests) {
-    const { weight } = jobInterestWeight(job, interest);
+    const { weight } = jobInterestWeightNormalized(norm, interest);
     if (weight > 0) {
       total += weight;
       matched.push(interest);
