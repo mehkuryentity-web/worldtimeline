@@ -231,6 +231,19 @@ function matchesCacheKey(userId: string, interests: string[]) {
   return `${MATCHES_CACHE_PREFIX}${userId}_${hashInterests(interests)}`;
 }
 
+// Promise .then() callbacks run as microtasks, which fully drain before the browser
+// paints the next frame. That means if data resolves quickly, a heavy synchronous
+// computation in the very next .then() can run BEFORE the loading UI ever gets drawn —
+// so a preloader's own code can be perfectly correct and still never appear on screen.
+// Awaiting this first forces an actual paint boundary. Two rAFs (not one) because a
+// single rAF can still land before the browser's paint step; the second is guaranteed
+// to run after it.
+function yieldToPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
 function readMatchesCache(userId: string, interests: string[]): { data: UnifiedMatch[]; cachedAt: string } | null {
   try {
     const raw = localStorage.getItem(matchesCacheKey(userId, interests));
@@ -981,6 +994,13 @@ function MatchesModal({ userId, interests, onClose, onEditInterests }: {
   userId: string; interests: string[]; onClose: () => void; onEditInterests: () => void;
 }) {
   const { update: updateAppState, state: appState } = useAppState();
+  // Purely cosmetic entrance — fires the instant the component mounts, independent of
+  // data/cache state, so opening always *feels* immediate even before content is ready.
+  const [entered, setEntered] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [categoryStatus, setCategoryStatus] = useState<Record<PanelId, CategoryStatus>>(EMPTY_STATUS);
@@ -1019,7 +1039,8 @@ function MatchesModal({ userId, interests, onClose, onEditInterests }: {
     };
 
     getJobs()
-      .then((jobsResult) => {
+      .then(async (jobsResult) => {
+        await yieldToPaint();
         const jobMatches = computeMatches(jobsResult.jobs, interests);
         collected.push(...jobMatches.map((m) => ({
           key: `jobs_${m.job.id}`, category: "jobs" as PanelId, scorePercent: m.scorePercent, matchedInterest: m.matchedInterest, job: m.job,
@@ -1043,7 +1064,8 @@ function MatchesModal({ userId, interests, onClose, onEditInterests }: {
 
     (["internships", "scholarships", "grants"] as XploreCategory[]).forEach((cat) => {
       fetchSection(cat)
-        .then((res) => {
+        .then(async (res) => {
+          await yieldToPaint();
           const items = res.items ?? [];
           const catMatches = computeXploreMatches(items, interests, cat);
           for (const m of catMatches) {
@@ -1105,7 +1127,7 @@ function MatchesModal({ userId, interests, onClose, onEditInterests }: {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background">
+    <div className={`fixed inset-0 z-50 flex flex-col bg-background transition-all duration-150 ${entered ? "opacity-100 scale-100" : "opacity-0 scale-[0.98]"}`}>
       <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-border flex-shrink-0">
         <div>
           <h2 className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider font-semibold"><Target className="h-4 w-4 text-primary" /> Your Matches</h2>
@@ -1614,11 +1636,11 @@ function XplorePage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button onClick={() => { if (!userId) navigate({ to: "/auth" }); else setShowMatches(true); }}
-                    className="flex items-center gap-1 rounded-full border border-border px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground hover:text-primary hover:border-primary transition">
+                    className="flex items-center gap-1 rounded-full border border-border px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-muted-foreground transition hover:text-primary hover:border-primary active:scale-95 active:bg-primary/10">
                     <Target className="h-3 w-3" /> Matches
                   </button>
                   <button onClick={() => setShowPost(true)}
-                    className="flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-primary-foreground">
+                    className="flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-primary-foreground transition active:scale-95">
                     <Plus className="h-3 w-3" /> Post
                   </button>
                 </div>
