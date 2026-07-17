@@ -22,8 +22,6 @@ import { findCountry } from "@/lib/countries";
 import { useAppState } from "@/hooks/use-app-state";
 import { Loader2, Timer } from "lucide-react";
 
-import { fetchPreloadedSummaries } from "@/lib/news.functions";
-import { enqueueArticles } from "@/lib/intelligence/preloadEngine";
 import { getNews } from "@/lib/news";
 import { getVideos, formatViewCount, type VideoListing } from "@/lib/videos";
 
@@ -79,7 +77,6 @@ function Home() {
     minutes: state.customRangeMinutes ?? "",
   });
 
-  const preloadedBatchesRef = useRef<Set<string>>(new Set());
   const touchStartX = useRef<number | null>(null);
 
   const touchStartY = useRef<number | null>(null);
@@ -236,33 +233,13 @@ function Home() {
     );
   }
 
+  // Summaries are generated purely on-click (see article.$id.tsx) and cached
+  // server-side in ai_article_summaries, shared across every user -- no
+  // preloading here, so we never spend Groq tokens on articles nobody
+  // actually opens.
   useEffect(() => {
     if (!items.length) return;
-
     cacheArticles(items);
-
-    const batch = items.slice(0, 12);
-    const key = batch.map((b) => b.id).join(",");
-
-    if (!preloadedBatchesRef.current.has(key)) {
-      preloadedBatchesRef.current.add(key);
-
-      fetchPreloadedSummaries(
-        batch.map((i) => ({
-          id: i.id,
-          title: i.title,
-          description: i.summary ?? "",
-          url: i.url ?? "",
-          author: i.source ?? "",
-          image: i.image ?? "",
-          language: "en",
-          category: [i.category],
-          published: i.publishedAt,
-        }))
-      ).catch(() => {});
-
-      enqueueArticles(items.slice(0, 12));
-    }
   }, [items]);
 
   // ---- VIDEO FEED (mixed into the main feed, not a separate tab) ----
