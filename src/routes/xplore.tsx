@@ -1379,19 +1379,74 @@ function XploreSectionPanel({ section, isActive, scrollRef, onScroll, onScrollIm
   const [showSources, setShowSources] = useState(false);
   const [saved, setSaved] = useState<Record<string, XploreItem>>(getSaved);
   const [xploreMatches, setXploreMatches] = useState<Map<string, XploreMatch>>(new Map());
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const loaded = useRef(false);
   const scrollRestored = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const knownIds = useRef<Set<string>>(new Set());
 
   const load = useCallback(() => {
     setLoading(true); setError(null);
     fetchSection(section)
-      .then((data) => { setItems(data.items); setSources(data.sources); })
+      .then((data) => {
+        setItems(data.items);
+        setSources(data.sources);
+        setPage(1);
+        setHasMore(data.items.length >= 30);
+        knownIds.current = new Set(data.items.map((i) => i.id));
+      })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [section]);
 
   useEffect(() => { if (loaded.current) return; loaded.current = true; load(); }, [load]);
+
+  // Reveal locally-buffered items first; once exhausted, pull the next page
+  // from get-xplore (which already supports it) and append.
+  const handleLoadMore = useCallback(async () => {
+    if (items && visibleCount < items.length) {
+      setVisibleCount((v) => v + PAGE_SIZE);
+      return;
+    }
+    if (!hasMore || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const next = page + 1;
+      const data = await fetchSectionLive(section, next);
+      const fresh = data.items.filter((i) => !knownIds.current.has(i.id));
+      fresh.forEach((i) => knownIds.current.add(i.id));
+      setItems((prev) => [...(prev ?? []), ...fresh]);
+      setPage(next);
+      setHasMore(data.items.length >= 30);
+      setVisibleCount((v) => v + PAGE_SIZE);
+    } catch {
+      // leave hasMore as-is so the button just retries on next tap
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [items, visibleCount, hasMore, loadingMore, page, section]);
+
+  // Background poll for newly-dripped items while the tab is open and active.
+  useEffect(() => {
+    if (!isActive) return;
+    const interval = setInterval(() => {
+      if (document.hidden) return;
+      fetchSectionLive(section, 1)
+        .then((data) => {
+          setSources(data.sources);
+          const fresh = data.items.filter((i) => !knownIds.current.has(i.id));
+          if (fresh.length === 0) return;
+          fresh.forEach((i) => knownIds.current.add(i.id));
+          setItems((prev) => [...fresh, ...(prev ?? [])]);
+          setVisibleCount((v) => v + fresh.length);
+        })
+        .catch(() => {});
+    }, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [isActive, section]);
 
   useEffect(() => {
     if (!items || scrollRestored.current || !isActive || !scrollRef.current) return;
@@ -1446,6 +1501,9 @@ function XploreSectionPanel({ section, isActive, scrollRef, onScroll, onScrollIm
     });
   }, [items, query, filters, section]);
 
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [query, filters]);
+
+  const visibleItems = filteredItems.slice(0, visibleCount);
   const errCount = sources.filter((s) => s.count === 0).length;
 
   return (
@@ -1487,11 +1545,21 @@ function XploreSectionPanel({ section, isActive, scrollRef, onScroll, onScrollIm
         )}
         {filteredItems.length > 0 && (
           <div className="space-y-2">
-            {filteredItems.map((item) => (
+            {visibleItems.map((item) => (
               <XploreCard key={item.id} item={item} section={section} saved={!!saved[item.id]}
                 onSave={(i) => setSaved(toggleSavedItem(i))} match={xploreMatches.get(item.id) ?? null}
                 userId={userId} />
             ))}
+            {(visibleCount < filteredItems.length || hasMore) && (
+              <button onClick={handleLoadMore} disabled={loadingMore}
+                className="w-full rounded-md border border-border bg-surface-1 py-2.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground disabled:opacity-50">
+                {loadingMore
+                  ? "Loading more..."
+                  : visibleCount < filteredItems.length
+                    ? `Load more (${filteredItems.length - visibleCount} remaining)`
+                    : "Load more"}
+              </button>
+            )}
           </div>
         )}
       </div>
