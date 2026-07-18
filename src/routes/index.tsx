@@ -521,20 +521,26 @@ function Home() {
           {countryMeta.flag} {countryMeta.name} · {category}
         </h2>
 
-        {isLoading ? (
-          hasLoadedOnce ? (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Loading feed...
-            </div>
+        {/* Touch handlers live on this stable wrapper, not on the branches
+            below -- it must stay mounted through category/country switches
+            so a swipe fired while the next category is still loading isn't
+            dropped onto a handler-less spinner div. */}
+        <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+          {isLoading ? (
+            hasLoadedOnce ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Loading feed...
+              </div>
+            ) : (
+              <TelemetryPreloader />
+            )
           ) : (
-            <TelemetryPreloader />
-          )
-        ) : (
-          <div className="space-y-3" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-            {visibleEntries.map((entry) => entry.node)}
-          </div>
-        )}
+            <div className="space-y-3">
+              {visibleEntries.map((entry) => entry.node)}
+            </div>
+          )}
+        </div>
 
         {hasMore && (
           <div ref={sentinelRef} className="h-8 w-full" aria-hidden="true" />
