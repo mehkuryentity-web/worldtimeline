@@ -17,7 +17,11 @@ export interface JobListing {
 
 const STORAGE_KEY = "worldtimeline_jobs";
 const CACHE_KEY = "worldtimeline_jobs_cache"; // external jobs cache (stale-while-revalidate)
-const CACHE_MAX_AGE_MS = 30 * 60 * 1000; // treat cache as usable for 30 min before forcing a blocking fetch
+// Cache is trusted at any age now -- it renders instantly no matter how
+// stale, and a background refresh keeps it honest. This constant only
+// throttles how often that background refresh actually fires, so flipping
+// between tabs/routes doesn't spam the edge function.
+const BACKGROUND_REFRESH_MIN_AGE_MS = 5 * 60 * 1000; // 5 min
 const GET_JOBS_URL =
   "https://fadiusjtmtemxvysodie.supabase.co/functions/v1/get-jobs";
 
@@ -150,25 +154,25 @@ function latestSyncTimestamp(sources: SourceStatus[]): string | null {
  * source) come from the Supabase-cached get-jobs edge function, which
  * already merges every cached provider server-side.
  *
- * ---- CLIENT-SIDE CACHE (stale-while-revalidate) ----
- * The server-side cache still refreshes hourly, but previously the client
- * had zero memory of the last successful response — every single mount
- * blocked on a network round trip and showed "Syncing...". Now the last
- * successful external-jobs response is cached in localStorage. If that
- * cache is fresh (< CACHE_MAX_AGE_MS), it's returned immediately with
- * fromCache: true and a background refresh is kicked off silently. If the
- * cache is stale or missing, this still blocks on a live fetch as before.
+ * ---- CLIENT-SIDE CACHE (stale-while-revalidate, never blocking) ----
+ * Any existing cache is returned instantly, however old it is -- the UI
+ * should never sit on "Syncing..." just because 30+ minutes passed. A
+ * background refresh is kicked off (throttled to once per
+ * BACKGROUND_REFRESH_MIN_AGE_MS) so the cache keeps catching up silently.
+ * The only time this blocks on the network is the very first visit on a
+ * given browser, when there's no cache to show yet.
  */
 export async function getJobs(): Promise<JobsFetchResult> {
   const community = readLocal();
   const cache = readCache();
-  const cacheAge = cache ? Date.now() - new Date(cache.cachedAt).getTime() : Infinity;
 
-  if (cache && cacheAge < CACHE_MAX_AGE_MS) {
-    // Return cached data instantly; refresh in background without blocking the caller.
-    fetchExternal().then((fresh) => {
-      if (fresh) writeCache(fresh.jobs, fresh.sources);
-    });
+  if (cache) {
+    const cacheAge = Date.now() - new Date(cache.cachedAt).getTime();
+    if (cacheAge > BACKGROUND_REFRESH_MIN_AGE_MS) {
+      fetchExternal().then((fresh) => {
+        if (fresh) writeCache(fresh.jobs, fresh.sources);
+      });
+    }
     return {
       jobs: mergeAndSort(community, cache.jobs),
       lastSyncedAt: latestSyncTimestamp(cache.sources),
@@ -177,6 +181,7 @@ export async function getJobs(): Promise<JobsFetchResult> {
     };
   }
 
+  // No cache at all -- first-ever visit on this browser. Has to block once.
   const fresh = await fetchExternal();
   if (fresh) {
     writeCache(fresh.jobs, fresh.sources);
@@ -188,16 +193,8 @@ export async function getJobs(): Promise<JobsFetchResult> {
     };
   }
 
-  // Network failed entirely — fall back to whatever cache exists, however stale.
-  if (cache) {
-    return {
-      jobs: mergeAndSort(community, cache.jobs),
-      lastSyncedAt: latestSyncTimestamp(cache.sources),
-      sources: cache.sources,
-      fromCache: true,
-    };
-  }
-
+  // Network failed entirely and there was never a cache -- nothing to show
+  // but whatever's local.
   return { jobs: community, lastSyncedAt: null, sources: [], fromCache: false };
 }
 
