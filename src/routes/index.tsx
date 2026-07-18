@@ -97,9 +97,13 @@ function Home() {
     // - exceeds 80px horizontal travel (rules out taps entirely)
     // - horizontal movement at least 2x vertical (rules out diagonal scrolls)
     if (Math.abs(deltaX) < 80 || Math.abs(deltaX) < Math.abs(deltaY) * 2) return;
-    // Don't swipe if the touch ended inside an anchor or button (tap on a card link)
-    const target = e.target as HTMLElement;
-    if (target.closest("a, button")) return;
+    // NOTE: we deliberately do NOT check target.closest("a, button") here.
+    // NewsCard's image and title/summary blocks are full-bleed <Link>
+    // elements covering nearly the entire card, so a real swipe's endpoint
+    // almost always lands inside one of them -- an anchor/button check at
+    // this point would swallow legitimate swipes, not just taps. The 80px
+    // + 2:1 horizontal/vertical ratio check above already reliably
+    // distinguishes a tap (near-zero movement) from a swipe.
     const currentIndex = CATEGORIES.indexOf(category);
     if (deltaX > 0) setCategory(CATEGORIES[Math.max(0, currentIndex - 1)]);
     else setCategory(CATEGORIES[Math.min(CATEGORIES.length - 1, currentIndex + 1)]);
