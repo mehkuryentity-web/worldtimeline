@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Clock, Radio } from "lucide-react";
 import type { NewsItem } from "@/lib/mock-news";
-import { TIMELINES } from "@/lib/mock-news";
+import { TIMELINES, cacheArticles } from "@/lib/mock-news";
 import { useAppState } from "@/hooks/use-app-state";
 import { timeAgo } from "@/lib/format";
 import { TimelineSheet } from "./TimelineSheet";
@@ -33,7 +33,7 @@ export function NewsCard({ item }: Props) {
         <Link
           to="/article/$id"
           params={{ id: item.id }}
-          onClick={() => award("read_article")}
+          onClick={() => { cacheArticles([item]); award("read_article"); }}
           className="block aspect-[16/9] w-full overflow-hidden bg-surface-2"
         >
           <img
@@ -51,7 +51,7 @@ export function NewsCard({ item }: Props) {
       <Link
         to="/article/$id"
         params={{ id: item.id }}
-        onClick={() => award("read_article")}
+        onClick={() => { cacheArticles([item]); award("read_article"); }}
         className="block px-4 py-3 transition hover:bg-background/30"
       >
         <h3 className="text-[16px] font-semibold leading-snug tracking-tight">{item.title}</h3>
