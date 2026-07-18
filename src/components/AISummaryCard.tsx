@@ -219,20 +219,20 @@ function AnimatedText({
     );
   }
 
-  /* matrix */
+ /* matrix */
   if (animStyle === "matrix") {
     const [matSummary, matConclusion] = matFull.split("\n\n");
-    const matrixCls = matDone
-      ? "text-sm leading-relaxed text-foreground"
-      : "text-sm leading-relaxed font-mono tracking-wide";
-    const matrixStyle = matDone ? undefined : { color: "#ffffff" };
+    // Use the app's standard text classes for the entire effect — only the
+    // characters scramble/settle, font and color never change, so there's
+    // no visual "snap" when the animation completes.
+    const matrixCls = "text-sm leading-relaxed text-foreground";
     return (
       <div className="mt-2 space-y-3">
-        <p className={matrixCls} style={matrixStyle}>
+        <p className={matrixCls}>
           {matSummary ?? ""}
         </p>
         {conclusion && (
-          <p className={matrixCls} style={matrixStyle}>
+          <p className={matrixCls}>
             {matConclusion ?? ""}
           </p>
         )}
