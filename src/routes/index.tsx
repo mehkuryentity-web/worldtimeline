@@ -115,6 +115,34 @@ function Home() {
     update((s) => ({ ...s, country: code }));
   };
 
+  // ---- FIRST-VISIT LOCATION DETECTION ----
+  // state.country is `undefined` only for a visitor who has never touched
+  // the country picker at all -- once anyone sets a country (even
+  // explicitly picking "Global"), it's persisted and this must never fire
+  // again or it'd override a real choice. Silent IP-based lookup (see
+  // api/geo.ts) -- no permission prompt. Any failure (lookup error,
+  // country not in COUNTRIES, local dev with no Vercel geo header) just
+  // leaves the existing GLOBAL default in place.
+  useEffect(() => {
+    if (state.country !== undefined) return;
+    let cancelled = false;
+    fetch("/api/geo")
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        const code = data?.country;
+        if (!code) return;
+        if (findCountry(code).code === code) setCountry(code);
+      })
+      .catch(() => {
+        // silent -- GLOBAL default stands
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const setCategory = (c: Category) => {
     setCategoryState(c);
     update((s) => ({ ...s, category: c }));
@@ -267,12 +295,29 @@ function Home() {
 
   const videoItems: VideoListing[] = videosData?.videos ?? [];
 
+  // Maps YouTube's own videoCategoryId (set by sync-youtube-videos, see
+  // CATEGORY_IDS there) to our app categories. "Top" and "Videos" (the
+  // dedicated video-section tab) intentionally see every synced category
+  // blended together -- everywhere else, a video only interleaves into
+  // the one category tab it actually matches. Categories with no entry
+  // here (Business, Tech, Science, Climate, Health, Entertainment) simply
+  // never get videos interleaved, since nothing syncs for them yet.
+  const YOUTUBE_CATEGORY_MAP: Record<string, Category> = {
+    "25": "Politics", // News & Politics
+    "17": "Sports",
+  };
+
+  const categoryScopedVideos =
+    category === "Top" || category === "Videos"
+      ? videoItems
+      : videoItems.filter((v) => YOUTUBE_CATEGORY_MAP[v.categoryId] === category);
+
   // Same time-window filter as articles, so switching "5 min / 24h / Custom"
   // applies consistently to both.
   const filteredVideos =
     mode === "all"
-      ? videoItems
-      : videoItems.filter((v) => {
+      ? categoryScopedVideos
+      : categoryScopedVideos.filter((v) => {
           const age = now - new Date(v.publishedAt).getTime();
           return age <= windowMs;
         });
