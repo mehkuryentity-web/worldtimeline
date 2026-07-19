@@ -138,4 +138,27 @@
   .ticker {
     animation: ticker 40s linear infinite;
   }
+
+  /* ArticleCover deterministic SVG covers -- ambient glow drift + reuse
+     of pulse-dot for the pulse-motif and tag-strip indicator dots. */
+  @keyframes cover-drift {
+    0%, 100% { transform: translate(0, 0); }
+    50% { transform: translate(14px, -10px); }
+  }
+  .cover-blob {
+    animation: cover-drift 9s ease-in-out infinite alternate;
+  }
+  .cover-blob-alt {
+    animation-duration: 11s;
+    animation-direction: alternate-reverse;
+  }
+  .cover-pulse-dot {
+    animation: pulse-dot 1.8s ease-in-out infinite;
+    transform-origin: center;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cover-blob, .cover-pulse-dot {
+      animation: none !important;
+    }
+  }
 }
