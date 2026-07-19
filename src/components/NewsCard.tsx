@@ -7,6 +7,7 @@ import { useAppState } from "@/hooks/use-app-state";
 import { timeAgo } from "@/lib/format";
 import { TimelineSheet } from "./TimelineSheet";
 import { ReactionBar } from "./ReactionBar";
+import { ArticleCover } from "./ArticleCover";
 
 interface Props {
   item: NewsItem;
@@ -48,18 +49,16 @@ export function NewsCard({ item }: Props) {
         </Link>
       ) : (
         // No source image (common for headline-list-only sources like
-        // NewsNow) or the image URL 404'd -- a designed placeholder reads
-        // as intentional; an empty gap where an image should be reads as
-        // broken.
+        // NewsNow) or the image URL 404'd -- a deterministic, category-
+        // themed cover reads as intentional editorial artwork; an empty
+        // gap where an image should be reads as broken.
         <Link
           to="/article/$id"
           params={{ id: item.id }}
           onClick={() => { cacheArticles([item]); award("read_article"); }}
-          className="flex aspect-[16/9] w-full items-center justify-center overflow-hidden bg-gradient-to-br from-surface-2 to-surface-1"
+          className="block aspect-[16/9] w-full overflow-hidden bg-surface-2"
         >
-          <span className="font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground/50">
-            {item.category}
-          </span>
+          <ArticleCover title={item.title} category={item.category} className="h-full w-full" />
         </Link>
       )}
 
