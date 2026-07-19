@@ -15,7 +15,9 @@ interface Props {
 export function NewsCard({ item }: Props) {
   const { award } = useAppState();
   const [openTimeline, setOpenTimeline] = useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
   const timeline = item.timelineId ? TIMELINES[item.timelineId] : null;
+  const showImage = Boolean(item.image) && !imgFailed;
 
   return (
     <article className="overflow-hidden rounded-xl border border-border bg-surface-1">
@@ -29,7 +31,7 @@ export function NewsCard({ item }: Props) {
         </span>
       </div>
 
-      {item.image && (
+      {showImage ? (
         <Link
           to="/article/$id"
           params={{ id: item.id }}
@@ -41,10 +43,23 @@ export function NewsCard({ item }: Props) {
             alt={item.title}
             loading="lazy"
             className="h-full w-full object-cover transition hover:scale-[1.02]"
-            onError={(e) => {
-              (e.currentTarget as HTMLImageElement).style.display = "none";
-            }}
+            onError={() => setImgFailed(true)}
           />
+        </Link>
+      ) : (
+        // No source image (common for headline-list-only sources like
+        // NewsNow) or the image URL 404'd -- a designed placeholder reads
+        // as intentional; an empty gap where an image should be reads as
+        // broken.
+        <Link
+          to="/article/$id"
+          params={{ id: item.id }}
+          onClick={() => { cacheArticles([item]); award("read_article"); }}
+          className="flex aspect-[16/9] w-full items-center justify-center overflow-hidden bg-gradient-to-br from-surface-2 to-surface-1"
+        >
+          <span className="font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground/50">
+            {item.category}
+          </span>
         </Link>
       )}
 
