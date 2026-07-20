@@ -9,7 +9,12 @@ import { TrendingLoader } from "@/components/TrendingLoader";
 import { getNews, searchNews, getTrendingKeywords } from "@/lib/news";
 import { cacheArticles, type NewsItem } from "@/lib/mock-news";
 
+type TrendingSearch = { q?: string };
+
 export const Route = createFileRoute("/trending")({
+  validateSearch: (search: Record<string, unknown>): TrendingSearch => ({
+    q: typeof search.q === "string" ? search.q : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Trending · WorldTimeline" },
@@ -19,10 +24,6 @@ export const Route = createFileRoute("/trending")({
   component: TrendingPage,
 });
 
-// Fallback only -- shown while getTrendingKeywords() is loading, or on the
-// rare occasion the archive doesn't yet have 2+ repeats of anything (cold
-// start / freshly cleared cache). Once real keywords come back they replace
-// this list entirely.
 const FALLBACK_SUGGESTIONS = [
   "Iran nuclear deal",
   "AI safety bill",
@@ -41,16 +42,35 @@ function byRecencyDesc(a: NewsItem, b: NewsItem) {
 }
 
 function TrendingPage() {
-  const [q, setQ] = useState("");
-  const [debounced, setDebounced] = useState("");
+  const { q: urlQ } = Route.useSearch();
+  const navigate = Route.useNavigate();
+
+  // Local input state stays for snappy typing; URL is the source of truth
+  // for what's actually "active" and what survives navigation away/back.
+  const [q, setQ] = useState(urlQ ?? "");
+  const [debounced, setDebounced] = useState(urlQ ?? "");
+
+  // Returning to /trending (POP nav from an article, or a fresh /trending?q=…
+  // deep link) remounts this component -- resync local state from the URL
+  // whenever it changes, instead of only reading it once on first mount.
+  useEffect(() => {
+    setQ(urlQ ?? "");
+    setDebounced(urlQ ?? "");
+  }, [urlQ]);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(q.trim()), 350);
+    const t = setTimeout(() => {
+      const trimmed = q.trim();
+      setDebounced(trimmed);
+      navigate({
+        search: (prev) => ({ ...prev, q: trimmed || undefined }),
+        replace: true,
+      });
+    }, 350);
     return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
-  // Real trending topics, computed server-side from recurring names/places
-  // in recent archive headlines -- see get-trending-keywords edge function.
   const keywords = useQuery({
     queryKey: ["trending-keywords"],
     queryFn: getTrendingKeywords,
@@ -58,14 +78,12 @@ function TrendingPage() {
   });
   const suggestions = keywords.data && keywords.data.length > 0 ? keywords.data : FALLBACK_SUGGESTIONS;
 
-  // Viral feed: Top global headlines, sorted by recency.
   const viral = useQuery({
     queryKey: ["trending-viral"],
     queryFn: () => getNews("Top", "GLOBAL"),
     staleTime: 5 * 60 * 1000,
   });
 
-  // Real archive search -- backs both the search box and the chip clicks.
   const search = useQuery({
     queryKey: ["trending-search", debounced.toLowerCase()],
     queryFn: () => searchNews(debounced),
@@ -85,8 +103,6 @@ function TrendingPage() {
 
   const showSearch = debounced.length > 1;
 
-  // First-ever load of the viral feed (no cached data yet) — show the
-  // animated preloader instead of an empty page.
   if (viral.isLoading) {
     return (
       <div className="min-h-screen bg-background pb-28">
