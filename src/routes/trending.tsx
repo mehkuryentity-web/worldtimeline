@@ -5,6 +5,7 @@ import { Search as SearchIcon, Loader2, Flame } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
 import { NewsCard } from "@/components/NewsCard";
+import { TrendingLoader } from "@/components/TrendingLoader";
 import { CATEGORIES, type Category, type NewsItem, cacheArticles } from "@/lib/mock-news";
 
 export const Route = createFileRoute("/trending")({
@@ -107,6 +108,18 @@ function TrendingPage() {
   }, [searchItems]);
 
   const showSearch = debounced.length > 1;
+
+  // First-ever load of the viral feed (no cached data yet) — show the
+  // animated preloader instead of an empty page.
+  if (viral.isLoading) {
+    return (
+      <div className="min-h-screen bg-background pb-28">
+        <TopBar />
+        <TrendingLoader />
+        <BottomNav />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background pb-28">
