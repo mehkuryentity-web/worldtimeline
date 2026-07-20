@@ -14,7 +14,15 @@ interface Props {
 
 export function ReactionBar({ item, showReadLink = true, defaultCommentsOpen = false }: Props) {
   const { state, award, update } = useAppState();
-  const a = state.articles[item.id] ?? { reaction: null, comments: [] };
+  const rawArticle = state.articles[item.id];
+  // Guard against a partial/legacy entry (e.g. `{ reaction: "like" }` with no
+  // `comments` array) -- without this, spreading `a.comments` in
+  // submitComment throws and crashes the whole page instead of just this
+  // comment.
+  const a = {
+    reaction: rawArticle?.reaction ?? null,
+    comments: Array.isArray(rawArticle?.comments) ? rawArticle.comments : [],
+  };
   const isSaved = Boolean(state.saved?.[item.id]);
   const [openComments, setOpenComments] = useState(defaultCommentsOpen);
   const [commentText, setCommentText] = useState("");
@@ -51,21 +59,28 @@ export function ReactionBar({ item, showReadLink = true, defaultCommentsOpen = f
 
   const submitComment = () => {
     if (!commentText.trim()) return;
-    update((s) => ({
-      ...s,
-      articles: {
-        ...s.articles,
-        [item.id]: {
-          ...a,
-          comments: [
-            { id: crypto.randomUUID(), at: new Date().toISOString(), text: commentText.trim() },
-            ...a.comments,
-          ],
+    try {
+      update((s) => ({
+        ...s,
+        articles: {
+          ...s.articles,
+          [item.id]: {
+            ...a,
+            comments: [
+              { id: crypto.randomUUID(), at: new Date().toISOString(), text: commentText.trim() },
+              ...a.comments,
+            ],
+          },
         },
-      },
-    }));
-    award("comment");
-    setCommentText("");
+      }));
+      award("comment");
+      setCommentText("");
+    } catch (err) {
+      // Never let a comment-post failure crash the whole page to the
+      // generic error boundary -- worst case, the comment silently
+      // doesn't post and the input stays as-is so the user can retry.
+      console.error("Failed to post comment", err);
+    }
   };
 
   const share = async () => {
