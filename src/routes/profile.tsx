@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { Zap, Trophy, Wallet, Activity, Calendar, Trash2, LogOut, LogIn, MessageSquarePlus, Check, ChevronDown, ChevronUp, Sparkles } from "lucide-react";
+import { Zap, Trophy, Wallet, Activity, Calendar, Trash2, LogOut, LogIn, MessageSquarePlus, Check, ChevronDown, ChevronUp, Sparkles, Bookmark, ChevronRight, Coins, History } from "lucide-react";
 import { type BriefingAnimation } from "@/components/AISummaryCard";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
@@ -164,14 +164,31 @@ function ProfilePage() {
           <Stat icon={Zap} label="Comments" value={totalComments} />
         </section>
 
+        {/* Saved articles */}
+        <Link
+          to="/saved"
+          className="flex items-center justify-between rounded-xl border border-border bg-surface-1 px-4 py-3"
+        >
+          <span className="flex items-center gap-2">
+            <Bookmark className="h-3.5 w-3.5 text-primary" />
+            <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+              Saved articles
+            </span>
+          </span>
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+        </Link>
+
         {/* Earning guide */}
         <section className="overflow-hidden rounded-xl border border-border bg-surface-1">
           <button
             onClick={() => setEarnPointsOpen((v) => !v)}
             className="flex w-full items-center justify-between px-4 py-3"
           >
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-              Earn points
+            <span className="flex items-center gap-2">
+              <Coins className="h-3.5 w-3.5 text-primary" />
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                Earn points
+              </span>
             </span>
             {earnPointsOpen ? (
               <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
@@ -199,8 +216,11 @@ function ProfilePage() {
               onClick={() => setRecentActivityOpen((v) => !v)}
               className="flex flex-1 items-center gap-2"
             >
-              <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                Recent activity
+              <span className="flex items-center gap-2">
+                <History className="h-3.5 w-3.5 text-primary" />
+                <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                  Recent activity
+                </span>
               </span>
               {recentActivityOpen ? (
                 <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
@@ -239,7 +259,63 @@ function ProfilePage() {
             </div>
           )}
         </section>
-        {/* Feedback */}
+        {/* AI Briefing Animation */}
+        <section className="overflow-hidden rounded-xl border border-border bg-surface-1">
+          <button
+            onClick={() => setBriefingAnimOpen((v) => !v)}
+            className="flex w-full items-center justify-between px-4 py-3"
+          >
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-3.5 w-3.5 text-primary" />
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                AI Briefing Style
+              </span>
+            </div>
+            {briefingAnimOpen ? (
+              <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+            )}
+          </button>
+
+          {briefingAnimOpen && (
+            <div className="border-t border-border p-4 space-y-2">
+              {(
+                [
+                  { value: "blur",       label: "Focus Blur",   desc: "Words sharpen into view" },
+                  { value: "typewriter", label: "Typewriter",   desc: "Characters type out one by one" },
+                  { value: "fade",       label: "Fade In",      desc: "Words fade in sequentially" },
+                  { value: "slide",      label: "Slide Up",     desc: "Words rise up into place" },
+                  { value: "matrix",     label: "Matrix",       desc: "Characters scramble before settling" },
+                  { value: "none",       label: "Instant",      desc: "Text appears all at once" },
+                ] as { value: BriefingAnimation; label: string; desc: string }[]
+              ).map(({ value, label, desc }) => {
+                const active = (state.briefingAnimation ?? "blur") === value;
+                return (
+                  <button
+                    key={value}
+                    onClick={() => update((s) => ({ ...s, briefingAnimation: value }))}
+                    className={`w-full flex items-center justify-between rounded-lg border px-3 py-2.5 text-left transition ${
+                      active
+                        ? "border-primary bg-primary/10"
+                        : "border-border bg-surface-2 hover:border-primary/40"
+                    }`}
+                  >
+                    <div>
+                      <div className={`text-sm font-medium ${active ? "text-primary" : "text-foreground"}`}>
+                        {label}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">{desc}</div>
+                    </div>
+                    {active && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* Feedback — always last */}
         <section className="overflow-hidden rounded-xl border border-border bg-surface-1">
           <button
             onClick={() => setFeedbackOpen((v) => !v)}
@@ -313,61 +389,6 @@ function ProfilePage() {
                   </button>
                 </div>
               )}
-            </div>
-          )}
-        </section>
-        {/* AI Briefing Animation */}
-        <section className="overflow-hidden rounded-xl border border-border bg-surface-1">
-          <button
-            onClick={() => setBriefingAnimOpen((v) => !v)}
-            className="flex w-full items-center justify-between px-4 py-3"
-          >
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-3.5 w-3.5 text-primary" />
-              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                AI Briefing Style
-              </span>
-            </div>
-            {briefingAnimOpen ? (
-              <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
-            ) : (
-              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-            )}
-          </button>
-
-          {briefingAnimOpen && (
-            <div className="border-t border-border p-4 space-y-2">
-              {(
-                [
-                  { value: "blur",       label: "Focus Blur",   desc: "Words sharpen into view" },
-                  { value: "typewriter", label: "Typewriter",   desc: "Characters type out one by one" },
-                  { value: "fade",       label: "Fade In",      desc: "Words fade in sequentially" },
-                  { value: "slide",      label: "Slide Up",     desc: "Words rise up into place" },
-                  { value: "matrix",     label: "Matrix",       desc: "Characters scramble before settling" },
-                  { value: "none",       label: "Instant",      desc: "Text appears all at once" },
-                ] as { value: BriefingAnimation; label: string; desc: string }[]
-              ).map(({ value, label, desc }) => {
-                const active = (state.briefingAnimation ?? "blur") === value;
-                return (
-                  <button
-                    key={value}
-                    onClick={() => update((s) => ({ ...s, briefingAnimation: value }))}
-                    className={`w-full flex items-center justify-between rounded-lg border px-3 py-2.5 text-left transition ${
-                      active
-                        ? "border-primary bg-primary/10"
-                        : "border-border bg-surface-2 hover:border-primary/40"
-                    }`}
-                  >
-                    <div>
-                      <div className={`text-sm font-medium ${active ? "text-primary" : "text-foreground"}`}>
-                        {label}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground">{desc}</div>
-                    </div>
-                    {active && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
-                  </button>
-                );
-              })}
             </div>
           )}
         </section>
