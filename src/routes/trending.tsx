@@ -6,7 +6,8 @@ import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
 import { NewsCard } from "@/components/NewsCard";
 import { TrendingLoader } from "@/components/TrendingLoader";
-import { CATEGORIES, type Category, type NewsItem, cacheArticles } from "@/lib/mock-news";
+import { getNews, searchNews, getTrendingKeywords } from "@/lib/news";
+import { cacheArticles, type NewsItem } from "@/lib/mock-news";
 
 export const Route = createFileRoute("/trending")({
   head: () => ({
@@ -18,8 +19,11 @@ export const Route = createFileRoute("/trending")({
   component: TrendingPage,
 });
 
-// Global trending search suggestions — refresh these as world events evolve.
-const SUGGESTIONS = [
+// Fallback only -- shown while getTrendingKeywords() is loading, or on the
+// rare occasion the archive doesn't yet have 2+ repeats of anything (cold
+// start / freshly cleared cache). Once real keywords come back they replace
+// this list entirely.
+const FALLBACK_SUGGESTIONS = [
   "Iran nuclear deal",
   "AI safety bill",
   "COP draft",
@@ -32,46 +36,8 @@ const SUGGESTIONS = [
   "Taylor Swift",
 ];
 
-interface ApiNewsItem {
-  id: string;
-  category: string;
-  title: string;
-  source: string;
-  region: string;
-  publishedAt: string;
-  summary: string;
-  url: string;
-  image?: string;
-}
-interface NewsResponse {
-  items: ApiNewsItem[];
-  cached: boolean;
-  error?: string;
-}
-
-async function fetchNews(params: { q?: string; category?: string }): Promise<NewsResponse> {
-  const sp = new URLSearchParams();
-  if (params.q) sp.set("q", params.q);
-  sp.set("category", params.category ?? "Top");
-  sp.set("country", "GLOBAL");
-  const res = await fetch(`/api/news?${sp.toString()}`);
-  return (await res.json()) as NewsResponse;
-}
-
-function normalize(items: ApiNewsItem[] = []): NewsItem[] {
-  return items
-    .map((n) => ({
-      id: n.id,
-      category: (CATEGORIES.includes(n.category as Category) ? n.category : "Top") as Category,
-      title: n.title,
-      source: n.source,
-      region: n.region,
-      publishedAt: n.publishedAt,
-      summary: n.summary,
-      url: n.url,
-      image: n.image,
-    }))
-    .sort((a, b) => +new Date(b.publishedAt) - +new Date(a.publishedAt));
+function byRecencyDesc(a: NewsItem, b: NewsItem) {
+  return +new Date(b.publishedAt) - +new Date(a.publishedAt);
 }
 
 function TrendingPage() {
@@ -83,22 +49,32 @@ function TrendingPage() {
     return () => clearTimeout(t);
   }, [q]);
 
+  // Real trending topics, computed server-side from recurring names/places
+  // in recent archive headlines -- see get-trending-keywords edge function.
+  const keywords = useQuery({
+    queryKey: ["trending-keywords"],
+    queryFn: getTrendingKeywords,
+    staleTime: 10 * 60 * 1000,
+  });
+  const suggestions = keywords.data && keywords.data.length > 0 ? keywords.data : FALLBACK_SUGGESTIONS;
+
   // Viral feed: Top global headlines, sorted by recency.
   const viral = useQuery({
     queryKey: ["trending-viral"],
-    queryFn: () => fetchNews({ category: "Top" }),
+    queryFn: () => getNews("Top", "GLOBAL"),
     staleTime: 5 * 60 * 1000,
   });
 
+  // Real archive search -- backs both the search box and the chip clicks.
   const search = useQuery({
     queryKey: ["trending-search", debounced.toLowerCase()],
-    queryFn: () => fetchNews({ q: debounced }),
+    queryFn: () => searchNews(debounced),
     enabled: debounced.length > 1,
     staleTime: 5 * 60 * 1000,
   });
 
-  const viralItems = useMemo(() => normalize(viral.data?.items), [viral.data]);
-  const searchItems = useMemo(() => normalize(search.data?.items), [search.data]);
+  const viralItems = useMemo(() => [...(viral.data ?? [])].sort(byRecencyDesc), [viral.data]);
+  const searchItems = useMemo(() => [...(search.data ?? [])].sort(byRecencyDesc), [search.data]);
 
   useEffect(() => {
     if (viralItems.length) cacheArticles(viralItems);
@@ -143,7 +119,7 @@ function TrendingPage() {
             Trending searches
           </h2>
           <div className="mt-2 flex flex-wrap gap-2">
-            {SUGGESTIONS.map((t) => (
+            {suggestions.map((t) => (
               <button
                 key={t}
                 onClick={() => setQ(t)}
