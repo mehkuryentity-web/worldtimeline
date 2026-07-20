@@ -88,7 +88,25 @@ export function load(): AppState {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return empty;
-    return { ...empty, ...JSON.parse(raw) };
+    const parsed = { ...empty, ...JSON.parse(raw) };
+
+    // Defensively normalize each article entry. Malformed/partial entries
+    // (e.g. from an older schema, a failed write, or manual localStorage
+    // edits) used to leave `comments` undefined -- spreading that with
+    // `...a.comments` in ReactionBar's submitComment threw a TypeError
+    // ("a.comments is not iterable"), which crashed the whole page to the
+    // generic "This page didn't load" error boundary instead of just
+    // failing to post the comment.
+    const articles: AppState["articles"] = {};
+    for (const [id, entry] of Object.entries(parsed.articles ?? {})) {
+      const a = entry as Partial<ArticleState> | null | undefined;
+      articles[id] = {
+        reaction: a?.reaction ?? null,
+        comments: Array.isArray(a?.comments) ? a!.comments : [],
+      };
+    }
+
+    return { ...parsed, articles };
   } catch {
     return empty;
   }
