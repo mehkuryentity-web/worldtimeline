@@ -97,13 +97,9 @@ function Home() {
     // - exceeds 80px horizontal travel (rules out taps entirely)
     // - horizontal movement at least 2x vertical (rules out diagonal scrolls)
     if (Math.abs(deltaX) < 80 || Math.abs(deltaX) < Math.abs(deltaY) * 2) return;
-    // NOTE: we deliberately do NOT check target.closest("a, button") here.
-    // NewsCard's image and title/summary blocks are full-bleed <Link>
-    // elements covering nearly the entire card, so a real swipe's endpoint
-    // almost always lands inside one of them -- an anchor/button check at
-    // this point would swallow legitimate swipes, not just taps. The 80px
-    // + 2:1 horizontal/vertical ratio check above already reliably
-    // distinguishes a tap (near-zero movement) from a swipe.
+    // Don't swipe if the touch ended inside an anchor or button (tap on a card link)
+    const target = e.target as HTMLElement;
+    if (target.closest("a, button")) return;
     const currentIndex = CATEGORIES.indexOf(category);
     if (deltaX > 0) setCategory(CATEGORIES[Math.max(0, currentIndex - 1)]);
     else setCategory(CATEGORIES[Math.min(CATEGORIES.length - 1, currentIndex + 1)]);
@@ -114,34 +110,6 @@ function Home() {
     setCountryState(code);
     update((s) => ({ ...s, country: code }));
   };
-
-  // ---- FIRST-VISIT LOCATION DETECTION ----
-  // state.country is `undefined` only for a visitor who has never touched
-  // the country picker at all -- once anyone sets a country (even
-  // explicitly picking "Global"), it's persisted and this must never fire
-  // again or it'd override a real choice. Silent IP-based lookup (see
-  // api/geo.ts) -- no permission prompt. Any failure (lookup error,
-  // country not in COUNTRIES, local dev with no Vercel geo header) just
-  // leaves the existing GLOBAL default in place.
-  useEffect(() => {
-    if (state.country !== undefined) return;
-    let cancelled = false;
-    fetch("/api/geo")
-      .then((r) => r.json())
-      .then((data) => {
-        if (cancelled) return;
-        const code = data?.country;
-        if (!code) return;
-        if (findCountry(code).code === code) setCountry(code);
-      })
-      .catch(() => {
-        // silent -- GLOBAL default stands
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const setCategory = (c: Category) => {
     setCategoryState(c);
@@ -174,7 +142,7 @@ function Home() {
     award("open_app");
   }, []);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isFetching } = useQuery({
     queryKey: ["news", country, category],
     // "Videos" isn't a real news category -- that tab is video-only, so
     // there's no point spending an API call that would just come back empty.
@@ -286,7 +254,7 @@ function Home() {
   // ---- VIDEO FEED (mixed into the main feed, not a separate tab) ----
   // Fetched independently of articles so a Supabase hiccup here never
   // blocks the article feed from rendering.
-  const { data: videosData } = useQuery({
+  const { data: videosData, isFetching: isFetchingVideos } = useQuery({
     queryKey: ["videos", country],
     queryFn: () => getVideos(country),
     staleTime: 5 * 60 * 1000,
@@ -295,29 +263,12 @@ function Home() {
 
   const videoItems: VideoListing[] = videosData?.videos ?? [];
 
-  // Maps YouTube's own videoCategoryId (set by sync-youtube-videos, see
-  // CATEGORY_IDS there) to our app categories. "Top" and "Videos" (the
-  // dedicated video-section tab) intentionally see every synced category
-  // blended together -- everywhere else, a video only interleaves into
-  // the one category tab it actually matches. Categories with no entry
-  // here (Business, Tech, Science, Climate, Health, Entertainment) simply
-  // never get videos interleaved, since nothing syncs for them yet.
-  const YOUTUBE_CATEGORY_MAP: Record<string, Category> = {
-    "25": "Politics", // News & Politics
-    "17": "Sports",
-  };
-
-  const categoryScopedVideos =
-    category === "Top" || category === "Videos"
-      ? videoItems
-      : videoItems.filter((v) => YOUTUBE_CATEGORY_MAP[v.categoryId] === category);
-
   // Same time-window filter as articles, so switching "5 min / 24h / Custom"
   // applies consistently to both.
   const filteredVideos =
     mode === "all"
-      ? categoryScopedVideos
-      : categoryScopedVideos.filter((v) => {
+      ? videoItems
+      : videoItems.filter((v) => {
           const age = now - new Date(v.publishedAt).getTime();
           return age <= windowMs;
         });
@@ -491,6 +442,34 @@ function Home() {
         })
       : items.slice(0, 6).map((i) => i.title);
 
+  // ---- BRIEFING SETTLE GATE ----
+  // React Query paints cached/stale data immediately on mount, then often
+  // resolves a background refetch with genuinely different top headlines a
+  // moment later. Feeding every intermediate value straight to the briefing
+  // card meant two real, back-to-back generations for what the user
+  // experiences as one page load: the stale set finishes playing, then the
+  // freshly-resolved set restarts it.
+  //
+  // This gates on the query's own `isFetching` flag rather than a timer:
+  // when data is already fresh (the common case -- repeat visits inside the
+  // 5-minute staleTime), isFetching is false immediately and the briefing
+  // starts with zero added delay. Only while a real background refetch is
+  // actually in flight does this hold off, and only for as long as that
+  // refetch genuinely takes -- not an arbitrary constant. It has no bearing
+  // on the server-side ai_briefings cache, which is shared across all users
+  // regardless of what any single client is doing here.
+  const briefingSourceSettled = category === "Videos" ? !isFetchingVideos : !isFetching;
+  const briefingKey = briefingHeadlines.join("|");
+  const [stableBriefingHeadlines, setStableBriefingHeadlines] = useState<string[]>(
+    briefingHeadlines
+  );
+
+  useEffect(() => {
+    if (!briefingSourceSettled) return;
+    setStableBriefingHeadlines(briefingHeadlines);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [briefingSourceSettled, briefingKey]);
+
   const isCustomValid =
     customRange.hours.trim() !== "" ||
     customRange.minutes.trim() !== "";
@@ -505,7 +484,7 @@ function Home() {
 
       <main className="mx-auto max-w-md space-y-4 px-4 pt-4 pb-6">
         <AISummaryCard
-          headlines={briefingHeadlines}
+          headlines={stableBriefingHeadlines}
           country={country}
           category={category}
           mode={mode}
@@ -570,26 +549,20 @@ function Home() {
           {countryMeta.flag} {countryMeta.name} · {category}
         </h2>
 
-        {/* Touch handlers live on this stable wrapper, not on the branches
-            below -- it must stay mounted through category/country switches
-            so a swipe fired while the next category is still loading isn't
-            dropped onto a handler-less spinner div. */}
-        <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-          {isLoading ? (
-            hasLoadedOnce ? (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Loading feed...
-              </div>
-            ) : (
-              <TelemetryPreloader />
-            )
-          ) : (
-            <div className="space-y-3">
-              {visibleEntries.map((entry) => entry.node)}
+        {isLoading ? (
+          hasLoadedOnce ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Loading feed...
             </div>
-          )}
-        </div>
+          ) : (
+            <TelemetryPreloader />
+          )
+        ) : (
+          <div className="space-y-3" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+            {visibleEntries.map((entry) => entry.node)}
+          </div>
+        )}
 
         {hasMore && (
           <div ref={sentinelRef} className="h-8 w-full" aria-hidden="true" />
