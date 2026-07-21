@@ -380,9 +380,27 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
         setConclusion(cached.conclusion);
         setAnimKey((k) => k + 1);
         setStatus("ready");
-      } else if (alive) {
-        setStatus("loading");
+
+        const { name, isGuest: guestFlag } = await resolveDisplayName();
+        if (alive) {
+          setGreetingName(name);
+          setIsGuest(guestFlag);
+        }
+
+        // A valid, unexpired local cache fully satisfies this view --
+        // stop here rather than also re-validating over the network.
+        // Previously this always continued on to generateBriefing()
+        // regardless, and if the server's copy had drifted at all from
+        // the local cache (which happens often given how the shared
+        // ai_briefings row can be refreshed by other requests), that
+        // produced a second, fully separate animated playback right
+        // after the cached one finished. The cache's own ONE_HOUR_MS
+        // expiry is already the freshness guarantee -- no need to
+        // double-check it here every time.
+        return;
       }
+
+      if (alive) setStatus("loading");
 
       const { name, isGuest: guestFlag } = await resolveDisplayName();
       if (!alive) return;
@@ -402,7 +420,7 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
         setCache(key, res.summary, res.conclusion || "");
         setAnimKey((k) => k + 1);
         setStatus("ready");
-      } else if (!cached) {
+      } else {
         setStatus("empty");
       }
     }
