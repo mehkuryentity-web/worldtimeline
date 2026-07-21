@@ -23,7 +23,8 @@ const MATRIX_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&!?";
 export type BriefingAnimation = "blur" | "typewriter" | "fade" | "slide" | "matrix" | "none";
 
 interface CachedBriefing { summary: string; conclusion: string; savedAt: number; }
-interface Props { headlines: string[]; country: string; category: string; mode: string; }
+type HeadlineInput = string | { title: string; summary?: string };
+interface Props { headlines: HeadlineInput[]; country: string; category: string; mode: string; }
 
 /* ---- Cache helpers ---- */
 function cacheKeyFor(c: string, cat: string, m: string) { return `${CACHE_KEY_PREFIX}${c}|${cat}|${m}`; }
@@ -364,7 +365,14 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
   // same headlines in a different order must NOT be treated as "new" --
   // that was causing the briefing to restart generation mid-stream and
   // waste a full Groq call on nothing.
-  const headlineSig = useMemo(() => [...headlines].sort().join("|"), [headlines]);
+  const headlineSig = useMemo(
+    () =>
+      headlines
+        .map((h) => (typeof h === "string" ? h : `${h.title}::${h.summary ?? ""}`))
+        .sort()
+        .join("|"),
+    [headlines]
+  );
 
   useEffect(() => {
     let alive = true;
