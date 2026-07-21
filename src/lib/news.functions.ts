@@ -67,11 +67,13 @@ function getSupabaseKey(): string {
    The backend decides whether to serve cache or generate.
 ----------------------------------------*/
 
+export type BriefingHeadlineInput = string | { title: string; summary?: string };
+
 export interface BriefingParams {
   country: string;
   category: string;
   mode: string;
-  headlines: string[];
+  headlines: BriefingHeadlineInput[];
 }
 
 export interface BriefingOptions {
