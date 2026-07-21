@@ -434,13 +434,20 @@ function Home() {
   // design), so feed the briefing top 5 videos' title/channel/view-count
   // instead -- same pipeline, different "headlines" content. Everywhere
   // else, real category-filtered article titles as before.
-  const briefingHeadlines: string[] =
+  // Videos keeps the pre-formatted string shape (get-briefing accepts both
+  // plain strings and {title, summary} objects). Article headlines now also
+  // carry each item's existing `summary` field alongside the title, so the
+  // briefing has real article context to ground against instead of a bare
+  // title -- this reduces both stale-knowledge errors (e.g. calling a
+  // current officeholder "former") and fabricated details, since the model
+  // has actual current-events text to defer to instead of guessing.
+  const briefingHeadlines: (string | { title: string; summary?: string })[] =
     category === "Videos"
       ? sortedVideos.slice(0, 5).map((v) => {
           const views = formatViewCount(v.viewCount);
           return `${v.title} — ${v.channelTitle}${views ? ` (${views})` : ""}`;
         })
-      : items.slice(0, 6).map((i) => i.title);
+      : items.slice(0, 6).map((i) => ({ title: i.title, summary: i.summary }));
 
   // ---- BRIEFING SETTLE GATE ----
   // React Query paints cached/stale data immediately on mount, then often
@@ -459,10 +466,12 @@ function Home() {
   // on the server-side ai_briefings cache, which is shared across all users
   // regardless of what any single client is doing here.
   const briefingSourceSettled = category === "Videos" ? !isFetchingVideos : !isFetching;
-  const briefingKey = briefingHeadlines.join("|");
-  const [stableBriefingHeadlines, setStableBriefingHeadlines] = useState<string[]>(
-    briefingHeadlines
-  );
+  const briefingKey = briefingHeadlines
+    .map((h) => (typeof h === "string" ? h : `${h.title}::${h.summary ?? ""}`))
+    .join("|");
+  const [stableBriefingHeadlines, setStableBriefingHeadlines] = useState<
+    (string | { title: string; summary?: string })[]
+  >(briefingHeadlines);
 
   useEffect(() => {
     if (!briefingSourceSettled) return;
