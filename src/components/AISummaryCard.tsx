@@ -375,6 +375,17 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
   );
 
   useEffect(() => {
+    // The feed's own fetch hasn't resolved into real top headlines yet --
+    // don't ask for a briefing until it has. Asking with an empty list
+    // used to make the backend fall back to whatever summary was last
+    // saved (returned with `stale: true`), and this component then wrongly
+    // wrote that hand-me-down into the local cache as if it were a fresh
+    // generation -- which blocked the real request that should have fired
+    // moments later once real headlines actually arrived, for a full hour.
+    // Simplest fix: never call at all until there's something real to hand
+    // over.
+    if (headlines.length === 0) return;
+
     let alive = true;
     const controller = new AbortController();
 
@@ -425,7 +436,11 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
         setShouldAnimate(decideAnimate(res.summary, res.conclusion || ""));
         setSummary(res.summary);
         setConclusion(res.conclusion || "");
-        setCache(key, res.summary, res.conclusion || "");
+        // `stale: true` means the backend had nothing new to work with and
+        // just handed back its last saved copy -- that's not a genuine new
+        // generation, so it must never be cached as one, or it would go on
+        // to block the real generation for another hour.
+        if (!res.stale) setCache(key, res.summary, res.conclusion || "");
         setAnimKey((k) => k + 1);
         setStatus("ready");
       } else {
