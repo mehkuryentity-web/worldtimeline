@@ -74,8 +74,13 @@ export interface BriefingParams {
   headlines: string[];
 }
 
+export interface BriefingOptions {
+  signal?: AbortSignal;
+}
+
 export const generateBriefing = async (
-  params: BriefingParams
+  params: BriefingParams,
+  opts?: BriefingOptions
 ): Promise<{
   summary: string;
   conclusion?: string;
@@ -94,6 +99,7 @@ export const generateBriefing = async (
           Authorization: `Bearer ${SUPABASE_KEY}`,
         },
         body: JSON.stringify(params),
+        signal: opts?.signal,
       }
     );
 
@@ -112,11 +118,12 @@ export const generateBriefing = async (
       cached: !!data?.cached,
     };
   } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      return { summary: "", error: "ABORTED" };
+    }
     return {
       summary: "",
       error: e instanceof Error ? e.message : "UNKNOWN_ERROR",
     };
   }
 };
-
-
