@@ -87,6 +87,7 @@ export const generateBriefing = async (
   summary: string;
   conclusion?: string;
   cached?: boolean;
+  stale?: boolean;
   error?: string;
 }> => {
   try {
@@ -118,6 +119,7 @@ export const generateBriefing = async (
       summary: data?.summary || "",
       conclusion: data?.conclusion || "",
       cached: !!data?.cached,
+      stale: !!data?.stale,
     };
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") {
