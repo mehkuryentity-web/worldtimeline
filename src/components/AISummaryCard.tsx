@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { generateBriefing } from "@/lib/news.functions";
 import { supabase } from "@/integrations/supabase/client";
@@ -196,19 +196,21 @@ function AnimatedText({
     );
   }
 
-  /* typewriter */
+  /* typewriter — standard app text style throughout, both while typing
+     and once finished. No special font/size while streaming: it should
+     read the same as every other piece of body text in the app. */
   if (animStyle === "typewriter") {
     const [twSummary, twConclusion] = twFull.split("\n\n");
     return (
       <div className="mt-2 space-y-3">
-        <p className="text-sm leading-relaxed text-foreground font-mono">
+        <p className="text-sm leading-relaxed text-foreground">
           {twSummary ?? ""}
           {(twSummary?.length ?? 0) < summary.length && (
             <span className="animate-pulse text-primary">|</span>
           )}
         </p>
         {conclusion && (
-          <p className="text-sm leading-relaxed text-foreground font-mono">
+          <p className="text-sm leading-relaxed text-foreground">
             {twConclusion ?? ""}
             {twConclusion !== undefined && twConclusion.length < conclusion.length && (
               <span className="animate-pulse text-primary">|</span>
@@ -219,20 +221,20 @@ function AnimatedText({
     );
   }
 
- /* matrix */
+  /* matrix */
   if (animStyle === "matrix") {
     const [matSummary, matConclusion] = matFull.split("\n\n");
-    // Use the app's standard text classes for the entire effect — only the
-    // characters scramble/settle, font and color never change, so there's
-    // no visual "snap" when the animation completes.
-    const matrixCls = "text-sm leading-relaxed text-foreground";
+    const matrixCls = matDone
+      ? "text-sm leading-relaxed text-foreground"
+      : "text-sm leading-relaxed font-mono tracking-wide";
+    const matrixStyle = matDone ? undefined : { color: "#ffffff" };
     return (
       <div className="mt-2 space-y-3">
-        <p className={matrixCls}>
+        <p className={matrixCls} style={matrixStyle}>
           {matSummary ?? ""}
         </p>
         {conclusion && (
-          <p className={matrixCls}>
+          <p className={matrixCls} style={matrixStyle}>
             {matConclusion ?? ""}
           </p>
         )}
@@ -338,7 +340,8 @@ function AnimatedText({
    ============================================================ */
 export function AISummaryCard({ headlines, country, category, mode }: Props) {
   const { state } = useAppState();
-  const animStyle: BriefingAnimation = (state.briefingAnimation as BriefingAnimation) ?? "matrix";
+  // Default is now "typewriter" (was "matrix").
+  const animStyle: BriefingAnimation = (state.briefingAnimation as BriefingAnimation) ?? "typewriter";
 
   const [greetingName, setGreetingName] = useState("there");
   const [isGuest, setIsGuest] = useState(true);
@@ -357,8 +360,15 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
     return true;
   }
 
+  // Order-insensitive signature: a background refetch that returns the
+  // same headlines in a different order must NOT be treated as "new" --
+  // that was causing the briefing to restart generation mid-stream and
+  // waste a full Groq call on nothing.
+  const headlineSig = useMemo(() => [...headlines].sort().join("|"), [headlines]);
+
   useEffect(() => {
     let alive = true;
+    const controller = new AbortController();
 
     async function load() {
       const key = cacheKeyFor(country, category, mode);
@@ -379,8 +389,11 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
       setGreetingName(name);
       setIsGuest(guestFlag);
 
-      const res = await generateBriefing({ country, category, mode, headlines });
-      if (!alive) return;
+      const res = await generateBriefing(
+        { country, category, mode, headlines },
+        { signal: controller.signal }
+      );
+      if (!alive || res.error === "ABORTED") return;
 
       if (typeof res?.summary === "string" && res.summary.trim().length > 0) {
         setShouldAnimate(decideAnimate(res.summary, res.conclusion || ""));
@@ -395,8 +408,8 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
     }
 
     load();
-    return () => { alive = false; };
-  }, [country, category, mode, headlines.join("|")]);
+    return () => { alive = false; controller.abort(); };
+  }, [country, category, mode, headlineSig]);
 
   return (
     <div className="rounded-xl border border-primary/40 bg-surface-1 p-4 text-foreground glow-primary">
