@@ -78,6 +78,20 @@ const DEFAULT_FILTERS: GlobalFilters = {
 const SUPABASE_URL = "https://fadiusjtmtemxvysodie.supabase.co";
 const SESSION_KEY = "xplore_session_v2";
 const SAVED_KEY = "xplore_saved";
+
+// Entry preloader — shown once per browser session (sessionStorage, not
+// localStorage) the first time someone opens Xplore. Purely cosmetic: it
+// runs on a fixed timer, not on the cache read, since cached data resolves
+// near-instantly anyway. Tab-switching within the same session never
+// re-triggers it; closing the site clears sessionStorage, so it's back
+// next visit.
+const XPLORE_PRELOADER_SESSION_KEY = "xplore_preloader_seen";
+const XPLORE_PRELOADER_DURATION_MS = 1500;
+const XPLORE_PRELOADER_TICKER = [
+  "Scanning global opportunities...",
+  "Matching jobs, scholarships & grants near you...",
+  "Zeroing in on internships worldwide...",
+];
 const PAGE_SIZE = 20;
 const JOB_TYPES: JobType[] = ["Full-time", "Part-time", "Contract", "Remote", "On-site"];
 const RECENCY_OPTIONS = [
@@ -1567,6 +1581,48 @@ function XploreSectionPanel({ section, isActive, scrollRef, onScroll, onScrollIm
   );
 }
 
+// ─── Entry Preloader ──────────────────────────────────────────────────────────
+// Radar-sweep intro shown once per browser session before the Xplore page
+// mounts. Reuses PANELS (same icons/labels as the tab bar) so the four
+// category nodes here match what the user lands on a moment later.
+
+function XplorePreloader({ tickerText, activeIndex }: { tickerText: string; activeIndex: number }) {
+  const nodePositions = [
+    "top-0 left-1/2 -translate-x-1/2 -translate-y-1/2",
+    "top-1/2 right-0 translate-x-1/2 -translate-y-1/2",
+    "bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2",
+    "top-1/2 left-0 -translate-x-1/2 -translate-y-1/2",
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-background">
+      <div className="relative h-36 w-36">
+        <div className="absolute inset-0 rounded-full border border-border" />
+        <div
+          className="absolute left-1/2 top-1/2 h-1/2 w-px origin-bottom bg-primary/50 animate-spin"
+          style={{ animationDuration: `${XPLORE_PRELOADER_DURATION_MS}ms` }}
+        />
+        {PANELS.map(({ id, label, icon: Icon }, i) => {
+          const active = i === activeIndex;
+          return (
+            <div key={id} className={`absolute ${nodePositions[i]} flex flex-col items-center gap-1 w-14`}>
+              <span
+                className={`flex h-8 w-8 items-center justify-center rounded-full border transition-colors ${
+                  active ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground bg-surface-1"
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+              </span>
+              <span className="font-mono text-[8px] uppercase tracking-wider text-muted-foreground">{label}</span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{tickerText}</p>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 function XplorePage() {
@@ -1599,6 +1655,39 @@ function XplorePage() {
   const headerVisible = useRef(true);
   const [headerShown, setHeaderShown] = useState(true);
   const [headerHeight, setHeaderHeight] = useState(999);
+
+  // Entry preloader — see XPLORE_PRELOADER_* constants above for the
+  // session-scoping rationale. Lazily read sessionStorage once on mount.
+  const [showEntryPreloader, setShowEntryPreloader] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem(XPLORE_PRELOADER_SESSION_KEY) !== "true";
+    } catch {
+      return false; // storage unavailable (private mode etc.) — don't block the page over it
+    }
+  });
+  const [preloaderTickerIndex, setPreloaderTickerIndex] = useState(0);
+  const [preloaderNodeIndex, setPreloaderNodeIndex] = useState(0);
+
+  useEffect(() => {
+    if (!showEntryPreloader) return;
+    const tickerInterval = setInterval(
+      () => setPreloaderTickerIndex((i) => (i + 1) % XPLORE_PRELOADER_TICKER.length),
+      XPLORE_PRELOADER_DURATION_MS / XPLORE_PRELOADER_TICKER.length
+    );
+    const nodeInterval = setInterval(
+      () => setPreloaderNodeIndex((i) => (i + 1) % PANELS.length),
+      XPLORE_PRELOADER_DURATION_MS / PANELS.length
+    );
+    const dismissTimer = setTimeout(() => {
+      try { sessionStorage.setItem(XPLORE_PRELOADER_SESSION_KEY, "true"); } catch {}
+      setShowEntryPreloader(false);
+    }, XPLORE_PRELOADER_DURATION_MS);
+    return () => {
+      clearInterval(tickerInterval);
+      clearInterval(nodeInterval);
+      clearTimeout(dismissTimer);
+    };
+  }, [showEntryPreloader]);
 
   useEffect(() => {
     const measure = () => {
@@ -1679,6 +1768,10 @@ function XplorePage() {
     if (dx > 0 && idx > 0) switchPanel(PANELS[idx - 1].id);
     if (dx < 0 && idx < PANELS.length - 1) switchPanel(PANELS[idx + 1].id);
   };
+
+  if (showEntryPreloader) {
+    return <XplorePreloader tickerText={XPLORE_PRELOADER_TICKER[preloaderTickerIndex]} activeIndex={preloaderNodeIndex} />;
+  }
 
   return (
     <div className="flex flex-col min-h-screen bg-background">
