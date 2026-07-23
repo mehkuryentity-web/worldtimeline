@@ -6,8 +6,8 @@ import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
 import { NewsCard } from "@/components/NewsCard";
 import { TrendingLoader } from "@/components/TrendingLoader";
-import { getNews, searchNews, getTrendingKeywords } from "@/lib/news";
-import { cacheArticles, type NewsItem } from "@/lib/mock-news";
+import { getTrendingKeywords, getTrendingArticles, searchTrendingArticles } from "@/lib/news";
+import { cacheArticles } from "@/lib/mock-news";
 
 type TrendingSearch = { q?: string };
 
@@ -36,10 +36,6 @@ const FALLBACK_SUGGESTIONS = [
   "Champions League",
   "Taylor Swift",
 ];
-
-function byRecencyDesc(a: NewsItem, b: NewsItem) {
-  return +new Date(b.publishedAt) - +new Date(a.publishedAt);
-}
 
 function TrendingPage() {
   const { q: urlQ } = Route.useSearch();
@@ -78,21 +74,33 @@ function TrendingPage() {
   });
   const suggestions = keywords.data && keywords.data.length > 0 ? keywords.data : FALLBACK_SUGGESTIONS;
 
+  // ---- Ranked, deduped "viral" clusters ----
+  // Was getNews("Top", "GLOBAL") -- an exact duplicate of the Global Top
+  // feed. get-trending-news scores by freshness + source diversity +
+  // mention velocity and returns one representative article per story, so
+  // this is no longer just a Top-feed mirror and no longer repeats the
+  // same event across multiple rows. Already ranked server-side, so no
+  // client-side recency re-sort is needed here.
   const viral = useQuery({
     queryKey: ["trending-viral"],
-    queryFn: () => getNews("Top", "GLOBAL"),
+    queryFn: getTrendingArticles,
     staleTime: 5 * 60 * 1000,
   });
 
+  // ---- Keyword chip / free-text search ----
+  // Resolves against the same server-side clusters when the term matches
+  // a current trending phrase (returns that story's full deduped article
+  // list); otherwise falls back to an archive search with light
+  // near-duplicate collapsing.
   const search = useQuery({
     queryKey: ["trending-search", debounced.toLowerCase()],
-    queryFn: () => searchNews(debounced),
+    queryFn: () => searchTrendingArticles(debounced),
     enabled: debounced.length > 1,
     staleTime: 5 * 60 * 1000,
   });
 
-  const viralItems = useMemo(() => [...(viral.data ?? [])].sort(byRecencyDesc), [viral.data]);
-  const searchItems = useMemo(() => [...(search.data ?? [])].sort(byRecencyDesc), [search.data]);
+  const viralItems = useMemo(() => viral.data ?? [], [viral.data]);
+  const searchItems = useMemo(() => search.data ?? [], [search.data]);
 
   useEffect(() => {
     if (viralItems.length) cacheArticles(viralItems);
