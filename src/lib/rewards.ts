@@ -114,7 +114,20 @@ export function load(): AppState {
 
 export function save(state: AppState) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(KEY, JSON.stringify(state));
+  } catch (err) {
+    // Quota exceeded (common once `saved` grows large, since each entry
+    // carries a full title/summary/image) or storage unavailable (Safari
+    // private mode) both throw synchronously here. This call happens inside
+    // a setState updater (see useAppState.update), so an uncaught throw
+    // doesn't just fail the save -- it aborts the render and gets caught by
+    // the root route's errorComponent, i.e. the whole page dies with
+    // "This page didn't load". Swallow it instead: the in-memory state (and
+    // therefore the UI) still updates via setState, it just won't persist
+    // across a reload until something is freed up.
+    console.error("Failed to persist app state", err);
+  }
   window.dispatchEvent(new CustomEvent("wt:state"));
 }
 
