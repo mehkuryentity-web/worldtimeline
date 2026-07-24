@@ -26,7 +26,7 @@ import type { JobMatch, XploreMatch, XploreCategory } from "@/lib/xplore-matches
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface XploreItem {
+export interface XploreItem {
   id: string;
   title: string;
   description: string | null;
@@ -45,6 +45,13 @@ interface XploreItem {
   company?: string | null;
   remote?: boolean;
   duration?: string | null;
+  /** Set only on entries persisted to SAVED_KEY -- records which Xplore
+   *  panel (scholarships/grants/internships) the item was saved from, so
+   *  the Saved page can tab it correctly. Not present on freshly-fetched
+   *  items. */
+  savedSection?: Exclude<PanelId, "jobs">;
+  /** Set only on entries persisted to SAVED_KEY. */
+  savedAt?: string;
 }
 
 interface XploreResponse {
@@ -56,7 +63,7 @@ interface XploreResponse {
   sources: { source: string; label: string; lastFetchedAt: string; count: number }[];
 }
 
-type PanelId = "jobs" | "internships" | "scholarships" | "grants";
+export type PanelId = "jobs" | "internships" | "scholarships" | "grants";
 type JobTypeFilter = JobType | "All";
 type Recency = "all" | "24h" | "7d" | "30d";
 
@@ -77,7 +84,8 @@ const DEFAULT_FILTERS: GlobalFilters = {
 
 const SUPABASE_URL = "https://fadiusjtmtemxvysodie.supabase.co";
 const SESSION_KEY = "xplore_session_v2";
-const SAVED_KEY = "xplore_saved";
+export const XPLORE_SAVED_KEY = "xplore_saved";
+const SAVED_KEY = XPLORE_SAVED_KEY;
 
 // Entry preloader — shown once per browser session (sessionStorage, not
 // localStorage) the first time someone opens Xplore. Purely cosmetic: it
@@ -131,14 +139,21 @@ function writeSession(s: XploreSession) {
 
 // ─── Saved ────────────────────────────────────────────────────────────────────
 
-function getSaved(): Record<string, XploreItem> {
+export function getSaved(): Record<string, XploreItem> {
   try { const r = localStorage.getItem(SAVED_KEY); return r ? JSON.parse(r) : {}; } catch { return {}; }
 }
 
-function toggleSavedItem(item: XploreItem): Record<string, XploreItem> {
+function toggleSavedItem(
+  item: XploreItem,
+  section: Exclude<PanelId, "jobs">,
+): Record<string, XploreItem> {
   const cur = getSaved();
-  if (cur[item.id]) delete cur[item.id]; else cur[item.id] = item;
-  try { localStorage.setItem(SAVED_KEY, JSON.stringify(cur)); } catch {}
+  if (cur[item.id]) delete cur[item.id];
+  else cur[item.id] = { ...item, savedSection: section, savedAt: new Date().toISOString() };
+  try {
+    localStorage.setItem(SAVED_KEY, JSON.stringify(cur));
+    window.dispatchEvent(new CustomEvent("wt:xplore-saved"));
+  } catch {}
   return cur;
 }
 
@@ -1202,7 +1217,8 @@ function MatchesModal({ userId, interests, onClose, onEditInterests }: {
                       onCountsChange={handleCountsChange} onInterestedChange={handleInterestedChange} onToggleSave={handleToggleSaveJob} />
                   ) : m.xploreItem ? (
                     <XploreCard item={m.xploreItem} section={m.category as Exclude<PanelId, "jobs">}
-                      saved={!!saved[m.xploreItem.id]} onSave={(i) => setSaved(toggleSavedItem(i))}
+                      saved={!!saved[m.xploreItem.id]}
+                      onSave={(i) => setSaved(toggleSavedItem(i, m.category as Exclude<PanelId, "jobs">))}
                       match={{ itemId: m.xploreItem.id, itemTitle: m.xploreItem.title, matchedInterest: m.matchedInterest, matchedKeyword: m.matchedInterest, scorePercent: m.scorePercent, matchedInterests: [m.matchedInterest], category: m.category as XploreCategory }}
                       userId={userId} />
                   ) : null}
@@ -1561,7 +1577,7 @@ function XploreSectionPanel({ section, isActive, scrollRef, onScroll, onScrollIm
           <div className="space-y-2">
             {visibleItems.map((item) => (
               <XploreCard key={item.id} item={item} section={section} saved={!!saved[item.id]}
-                onSave={(i) => setSaved(toggleSavedItem(i))} match={xploreMatches.get(item.id) ?? null}
+                onSave={(i) => setSaved(toggleSavedItem(i, section))} match={xploreMatches.get(item.id) ?? null}
                 userId={userId} />
             ))}
             {(visibleCount < filteredItems.length || hasMore) && (
