@@ -1565,15 +1565,11 @@ function XploreSectionPanel({ section, isActive, scrollRef, onScroll, onScrollIm
   return (
     <div ref={scrollRef} className="absolute inset-0 overflow-y-auto" onScroll={handleScroll}>
       <div className="px-4 pt-3 pb-6 space-y-3">
-        {sources.length > 0 && (
+        {errCount > 0 && (
           <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-            <RefreshCw className="h-3 w-3" />
-            {items ? `${filteredItems.length} listings` : "Loading..."}
-            {errCount > 0 && (
-              <button onClick={() => setShowSources((v) => !v)} className="ml-1 flex items-center gap-1 text-amber-500">
-                <AlertTriangle className="h-3 w-3" />{errCount} source{errCount > 1 ? "s" : ""} empty
-              </button>
-            )}
+            <button onClick={() => setShowSources((v) => !v)} className="flex items-center gap-1 text-amber-500">
+              <AlertTriangle className="h-3 w-3" />{errCount} source{errCount > 1 ? "s" : ""} empty
+            </button>
           </div>
         )}
         {showSources && (
