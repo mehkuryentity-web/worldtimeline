@@ -336,7 +336,7 @@ function Home() {
     items.forEach((item, i) => {
       feedEntries.push({
         publishedAt: item.publishedAt,
-        node: <NewsCard key={`a-${item.id}`} item={item} />,
+        node: <NewsCard key={`a-${item.id}`} item={item} useIngestedTime={mode !== "all"} />,
       });
 
       if ((i + 1) % ARTICLES_PER_VIDEO === 0 && videoIdx < sortedVideos.length) {
