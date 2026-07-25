@@ -133,6 +133,38 @@ async function fetchExternal(): Promise<{ jobs: JobListing[]; sources: SourceSta
   }
 }
 
+// Live server-side search (q and/or location). Unlike getJobs(), this never
+// reads or writes the 1000-row client cache -- it always hits get-jobs
+// directly with the search params, which now filter server-side across the
+// FULL archive (~5400+ rows within the 31-day window) instead of only the
+// newest 1000 that used to be all the cache ever held.
+async function searchExternal(q: string, location: string): Promise<{ jobs: JobListing[]; sources: SourceStatus[] } | null> {
+  try {
+    const sp = new URLSearchParams();
+    if (q) sp.set("q", q);
+    if (location) sp.set("location", location);
+    const res = await fetch(`${GET_JOBS_URL}?${sp.toString()}`, { method: "POST" });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const jobs = Array.isArray(json?.jobs) ? json.jobs.map(normalizeCachedJob) : [];
+    const sources = Array.isArray(json?.sources) ? json.sources : [];
+    return { jobs, sources };
+  } catch {
+    return null;
+  }
+}
+
+function matchesLocal(job: JobListing, q: string, location: string): boolean {
+  if (location && !job.location.toLowerCase().includes(location.toLowerCase())) return false;
+  if (!q) return true;
+  const ql = q.toLowerCase();
+  return (
+    job.title.toLowerCase().includes(ql) ||
+    job.company.toLowerCase().includes(ql) ||
+    job.location.toLowerCase().includes(ql)
+  );
+}
+
 function mergeAndSort(community: JobListing[], external: JobListing[]): JobListing[] {
   return [...community, ...external].sort(
     (a, b) => new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime()
@@ -196,6 +228,24 @@ export async function getJobs(): Promise<JobsFetchResult> {
   // Network failed entirely and there was never a cache -- nothing to show
   // but whatever's local.
   return { jobs: community, lastSyncedAt: null, sources: [], fromCache: false };
+}
+
+/**
+ * Live server-side search across the full job archive (see searchExternal).
+ * Used instead of getJobs() whenever the Jobs panel has an active keyword
+ * or location filter, so a search reaches every row in the archive rather
+ * than only whatever happened to be in the 1000-row default cache.
+ */
+export async function searchJobs(q: string, location: string): Promise<JobsFetchResult> {
+  const community = readLocal().filter((j) => matchesLocal(j, q, location));
+  const result = await searchExternal(q, location);
+  if (!result) return { jobs: community, lastSyncedAt: null, sources: [], fromCache: false };
+  return {
+    jobs: mergeAndSort(community, result.jobs),
+    lastSyncedAt: latestSyncTimestamp(result.sources),
+    sources: result.sources,
+    fromCache: false,
+  };
 }
 
 export async function postJob(
