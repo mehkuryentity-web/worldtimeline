@@ -35,6 +35,7 @@ export async function getNews(category: Category, country: string): Promise<News
       source: n.author || "News",
       region: n.region || "GLOBAL",
       publishedAt: n.publishedAt,
+      ingestedAt: n.ingestedAt,
       summary: n.summary || "",
       url: n.url,
       image: n.image || undefined,
