@@ -37,6 +37,7 @@ interface ApiNewsItem {
   source: string;
   region: string;
   publishedAt: string;
+  ingestedAt?: string;
   summary: string;
   url: string;
   image?: string;
@@ -142,7 +143,7 @@ function Home() {
     award("open_app");
   }, []);
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["news", country, category],
     // "Videos" isn't a real news category -- that tab is video-only, so
     // there's no point spending an API call that would just come back empty.
@@ -154,6 +155,21 @@ function Home() {
     retry: false,
     staleTime: 5 * 60 * 1000,
   });
+
+  // Tight windows (5m/10m/30m) now filter by ingestion time, so a batch
+  // sitting in cache for up to staleTime (5min) can itself be stale enough
+  // to hide items that would otherwise pass the filter. Force a fresh pull
+  // the moment one of those windows is selected rather than waiting out the
+  // normal cache -- 1h/24h/all/custom keep the regular 5-min cache since
+  // they're far less sensitive to a few minutes of staleness.
+  const TIGHT_MODES: Mode[] = ["5m", "10m", "30m"];
+  const prevModeRef = useRef<Mode>(mode);
+  useEffect(() => {
+    if (TIGHT_MODES.includes(mode) && prevModeRef.current !== mode) {
+      refetch();
+    }
+    prevModeRef.current = mode;
+  }, [mode, refetch]);
 
   // The telemetry preloader is reserved for the very first feed load only.
   // Category/country switches re-trigger isLoading (new query key), but
@@ -170,6 +186,7 @@ function Home() {
     source: n.source,
     region: n.region,
     publishedAt: n.publishedAt,
+    ingestedAt: n.ingestedAt,
     summary: n.summary,
     url: n.url,
     image: n.image,
@@ -230,8 +247,18 @@ function Home() {
         new Date(a.publishedAt).getTime()
     );
   } else {
+    // Freshness here is measured by ingestion time (when we last confirmed
+    // the item in the archive), not by the source's claimed publish time.
+    // Sync cadence tops out at 5min for the fastest provider and runs up to
+    // 2-3hr for others, so published_at is routinely 10-90+ minutes old by
+    // the time a row lands in the archive -- filtering the 5/10/30-min
+    // windows against it was structurally close to always-empty regardless
+    // of real freshness. ingestedAt reflects "new to WorldTimeline", which
+    // is what these tight windows are meant to mean. Community posts (no
+    // ingestedAt from the API) fall back to publishedAt, unaffected.
     const filtered = allItems.filter((item) => {
-      const age = now - new Date(item.publishedAt).getTime();
+      const freshnessBasis = item.ingestedAt ?? item.publishedAt;
+      const age = now - new Date(freshnessBasis).getTime();
       return age <= windowMs;
     });
 
