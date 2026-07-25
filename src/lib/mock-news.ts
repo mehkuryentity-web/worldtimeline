@@ -57,6 +57,11 @@ export interface NewsItem {
   source: string;
   region: string;
   publishedAt: string; // ISO
+  /** When this item was last confirmed present in our archive (ingestion
+   *  time), as opposed to publishedAt (the source's claimed publish time).
+   *  Optional -- mock/community items don't set it and fall back to
+   *  publishedAt wherever it's used. */
+  ingestedAt?: string; // ISO
   summary: string;
   url: string;
   breaking?: boolean;
