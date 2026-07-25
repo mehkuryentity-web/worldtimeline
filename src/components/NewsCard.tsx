@@ -11,14 +11,22 @@ import { ArticleCover } from "./ArticleCover";
 
 interface Props {
   item: NewsItem;
+  /** When true, show recency based on ingestedAt (when we archived it)
+   *  instead of publishedAt (the source's claimed publish time). Used by
+   *  the home feed's time selector, whose 5m/10m/30m/1h/24h/custom windows
+   *  now *filter* on ingestedAt too -- without this the card could pass a
+   *  "last 10 min" filter yet display a stamp like "5h ago", which reads as
+   *  broken even though the filter is working correctly. */
+  useIngestedTime?: boolean;
 }
 
-export function NewsCard({ item }: Props) {
+export function NewsCard({ item, useIngestedTime = false }: Props) {
   const { award } = useAppState();
   const [openTimeline, setOpenTimeline] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
   const timeline = item.timelineId ? TIMELINES[item.timelineId] : null;
   const showImage = Boolean(item.image) && !imgFailed;
+  const displayTimestamp = useIngestedTime ? item.ingestedAt ?? item.publishedAt : item.publishedAt;
 
   return (
     <article className="overflow-hidden rounded-xl border border-border bg-surface-1">
@@ -28,7 +36,7 @@ export function NewsCard({ item }: Props) {
         </span>
         <span className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
           <Clock className="h-3 w-3" />
-          {timeAgo(item.publishedAt)}
+          {timeAgo(displayTimestamp)}
         </span>
       </div>
 
