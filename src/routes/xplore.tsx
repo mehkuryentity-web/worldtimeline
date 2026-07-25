@@ -11,7 +11,7 @@ import {
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
 import { useAppState } from "@/hooks/use-app-state";
-import { getJobs, postJob, timeAgo as jobTimeAgo } from "@/lib/jobs";
+import { getJobs, postJob, searchJobs, timeAgo as jobTimeAgo } from "@/lib/jobs";
 import type { JobListing, JobType, SourceStatus } from "@/lib/jobs";
 import {
   getCurrentUserId, getEngagementCounts, getMyReactions, recordView, toggleInterested,
@@ -214,15 +214,32 @@ function writeXploreCache(type: string, data: XploreResponse) {
   }
 }
 
-async function fetchSectionLive(type: Exclude<PanelId, "jobs">, page = 1): Promise<XploreResponse> {
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/get-xplore?type=${type}&page=${page}&limit=30`);
+// Server-side search params, forwarded straight to get-xplore. When either
+// is set, the backend searches the FULL archive table (not just whatever
+// page happens to be buffered client-side) -- see get-xplore's q/country
+// handling. country also falls back to matching title/description server-side,
+// since the dedicated country column is null for most scholarship rows.
+interface XploreSearchParams { q?: string; country?: string }
+
+function buildXploreUrl(type: string, page: number, params?: XploreSearchParams): string {
+  const sp = new URLSearchParams({ type, page: String(page), limit: "30" });
+  if (params?.q) sp.set("q", params.q);
+  if (params?.country) sp.set("country", params.country);
+  return `${SUPABASE_URL}/functions/v1/get-xplore?${sp.toString()}`;
+}
+
+async function fetchSectionLive(type: Exclude<PanelId, "jobs">, page = 1, params?: XploreSearchParams): Promise<XploreResponse> {
+  const res = await fetch(buildXploreUrl(type, page, params));
   if (!res.ok) throw new Error(`get-xplore ${res.status}`);
   return res.json();
 }
 
-async function fetchSection(type: Exclude<PanelId, "jobs">, page = 1): Promise<XploreResponse> {
-  // Cache is keyed by type only (page 1), matching how panels actually use it
-  const cache = page === 1 ? readXploreCache(type) : null;
+async function fetchSection(type: Exclude<PanelId, "jobs">, page = 1, params?: XploreSearchParams): Promise<XploreResponse> {
+  // The 15-min localStorage cache only applies to the default, unfiltered
+  // page-1 view -- a live search always hits the network so it searches
+  // current data across the whole archive rather than a stale cached slice.
+  const isSearch = Boolean(params?.q || params?.country);
+  const cache = page === 1 && !isSearch ? readXploreCache(type) : null;
   const cacheAge = cache ? Date.now() - new Date(cache.cachedAt).getTime() : Infinity;
 
   if (cache && cacheAge < XPLORE_CACHE_MAX_AGE_MS) {
@@ -232,8 +249,8 @@ async function fetchSection(type: Exclude<PanelId, "jobs">, page = 1): Promise<X
   }
 
   try {
-    const fresh = await fetchSectionLive(type, page);
-    if (page === 1) writeXploreCache(type, fresh);
+    const fresh = await fetchSectionLive(type, page, params);
+    if (page === 1 && !isSearch) writeXploreCache(type, fresh);
     return fresh;
   } catch (e) {
     // Network failed — fall back to stale cache rather than showing an error
@@ -1252,6 +1269,11 @@ function JobsPanel({ scrollRef, isActive, onScroll, onScrollImmediate, userId, i
   const loaded = useRef(false);
   const scrollRestored = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mirrors XploreSectionPanel's pattern: whether the panel is currently
+  // showing live search results (keyword or location filter set) rather
+  // than the default cached feed.
+  const searchActiveRef = useRef(false);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1274,6 +1296,44 @@ function JobsPanel({ scrollRef, isActive, onScroll, onScrollImmediate, userId, i
     loaded.current = true;
     load();
   }, [load]);
+
+  // Live server-side search: get-jobs previously only ever held/returned the
+  // newest 1000 archive rows (~5400+ exist within the 31-day window), so any
+  // keyword or location typed here only ever searched that same fixed slice.
+  // Whenever either field is set, query get-jobs directly (debounced) so
+  // matches come from the full archive. Clearing both drops back to the
+  // normal cached feed.
+  useEffect(() => {
+    const q = query.trim();
+    const loc = filters.location.trim();
+
+    if (!q && !loc) {
+      if (searchActiveRef.current) { searchActiveRef.current = false; load(); }
+      return;
+    }
+
+    searchActiveRef.current = true;
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      setLoading(true);
+      searchJobs(q, loc)
+        .then(async (result) => {
+          setJobs(result.jobs);
+          setLastSyncedAt(result.lastSyncedAt);
+          setSources(result.sources);
+          const ids = result.jobs.map((j) => j.id);
+          const [counts, mine] = await Promise.all([
+            getEngagementCounts(ids),
+            userId ? getMyReactions(ids, userId) : Promise.resolve(new Set<string>()),
+          ]);
+          setEngagementMap(counts);
+          setMyReactions(mine);
+        })
+        .finally(() => setLoading(false));
+    }, 350);
+
+    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+  }, [query, filters.location, userId, load]);
 
   useEffect(() => {
     if (!userId || interests.length === 0 || jobs.length === 0) { setMatchInfo(new Map()); return; }
@@ -1306,8 +1366,13 @@ function JobsPanel({ scrollRef, isActive, onScroll, onScrollImmediate, userId, i
   };
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const loc = filters.location.trim().toLowerCase();
+    // When a live search is active, `jobs` already came back from get-jobs
+    // pre-filtered by q/location (q also matches description server-side,
+    // which this client check doesn't) -- so skip re-narrowing by those and
+    // only apply the facet filters the server doesn't know about.
+    const isSearch = searchActiveRef.current;
+    const q = isSearch ? "" : query.trim().toLowerCase();
+    const loc = isSearch ? "" : filters.location.trim().toLowerCase();
     const recencyMs: Record<Exclude<Recency, "all">, number> = { "24h": 86400000, "7d": 604800000, "30d": 2592000000 };
     const now = Date.now();
     return jobs.filter((j) => {
@@ -1417,6 +1482,12 @@ function XploreSectionPanel({ section, isActive, scrollRef, onScroll, onScrollIm
   const scrollRestored = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const knownIds = useRef<Set<string>>(new Set());
+  // Whether the panel is currently showing live search results (query text
+  // or a location/country filter is set) rather than the default paginated
+  // feed. Pagination, the background poll, and cache reads all need to know
+  // this so they don't silently fall back to the unfiltered view mid-search.
+  const searchActiveRef = useRef(false);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(() => {
     setLoading(true); setError(null);
@@ -1433,6 +1504,38 @@ function XploreSectionPanel({ section, isActive, scrollRef, onScroll, onScrollIm
   }, [section]);
 
   useEffect(() => { if (loaded.current) return; loaded.current = true; load(); }, [load]);
+
+  // Live server-side search: whenever a keyword or location/country filter
+  // is present, query get-xplore directly (debounced) so results come from
+  // the full archive instead of only whatever page is already buffered
+  // locally. Clearing both fields drops back to the normal cached feed.
+  useEffect(() => {
+    const q = query.trim();
+    const country = filters.location.trim();
+
+    if (!q && !country) {
+      if (searchActiveRef.current) { searchActiveRef.current = false; load(); }
+      return;
+    }
+
+    searchActiveRef.current = true;
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      setLoading(true); setError(null);
+      fetchSectionLive(section, 1, { q, country })
+        .then((data) => {
+          setItems(data.items);
+          setSources(data.sources);
+          setPage(1);
+          setHasMore(data.items.length >= 30);
+          knownIds.current = new Set(data.items.map((i) => i.id));
+        })
+        .catch((e) => setError(e.message))
+        .finally(() => setLoading(false));
+    }, 350);
+
+    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+  }, [query, filters.location, section, load]);
 
   // Reveal locally-buffered items first; once exhausted, pull the next page
   // from get-xplore (which already supports it) and append.
@@ -1454,7 +1557,9 @@ function XploreSectionPanel({ section, isActive, scrollRef, onScroll, onScrollIm
     setLoadingMore(true);
     try {
       const next = page + 1;
-      const data = await fetchSectionLive(section, next);
+      const q = query.trim();
+      const country = filters.location.trim();
+      const data = await fetchSectionLive(section, next, (q || country) ? { q, country } : undefined);
       const fresh = data.items.filter((i) => !knownIds.current.has(i.id));
       fresh.forEach((i) => knownIds.current.add(i.id));
       setItems((prev) => [...(prev ?? []), ...fresh]);
@@ -1467,13 +1572,13 @@ function XploreSectionPanel({ section, isActive, scrollRef, onScroll, onScrollIm
       fetchLock.current = false;
       setLoadingMore(false);
     }
-  }, [items, visibleCount, hasMore, page, section]);
+  }, [items, visibleCount, hasMore, page, section, query, filters.location]);
 
   // Background poll for newly-dripped items while the tab is open and active.
   useEffect(() => {
     if (!isActive) return;
     const interval = setInterval(() => {
-      if (document.hidden) return;
+      if (document.hidden || searchActiveRef.current) return;
       fetchSectionLive(section, 1)
         .then((data) => {
           setSources(data.sources);
@@ -1533,8 +1638,15 @@ function XploreSectionPanel({ section, isActive, scrollRef, onScroll, onScrollIm
 
   const filteredItems = useMemo(() => {
     if (!items) return [];
-    const q = query.trim().toLowerCase();
-    const loc = filters.location.trim().toLowerCase();
+    // When a live search is active, `items` already came back from
+    // get-xplore pre-filtered by q/country (with the same title/description
+    // fallback the server applies for sparse country data). Re-checking the
+    // strict `i.country` substring here would wrongly drop matches that only
+    // matched via title/description, so skip re-narrowing by loc/q and only
+    // apply the extra facet filters below, which the server doesn't know about.
+    const isSearch = searchActiveRef.current;
+    const q = isSearch ? "" : query.trim().toLowerCase();
+    const loc = isSearch ? "" : filters.location.trim().toLowerCase();
     const recencyMs: Record<Exclude<Recency, "all">, number> = { "24h": 86400000, "7d": 604800000, "30d": 2592000000 };
     const now = Date.now();
     return items.filter((i) => {
