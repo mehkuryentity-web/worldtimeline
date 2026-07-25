@@ -1436,12 +1436,21 @@ function XploreSectionPanel({ section, isActive, scrollRef, onScroll, onScrollIm
 
   // Reveal locally-buffered items first; once exhausted, pull the next page
   // from get-xplore (which already supports it) and append.
+  //
+  // fetchLock is a ref (synchronous) rather than relying on the loadingMore
+  // *state* alone -- now that this fires from scroll position (many events
+  // per drag/momentum-scroll) instead of a single button click, several
+  // calls can land in the same tick before React re-renders with
+  // loadingMore=true, which would otherwise fire duplicate requests for the
+  // same page.
+  const fetchLock = useRef(false);
   const handleLoadMore = useCallback(async () => {
     if (items && visibleCount < items.length) {
       setVisibleCount((v) => v + PAGE_SIZE);
       return;
     }
-    if (!hasMore || loadingMore) return;
+    if (!hasMore || fetchLock.current) return;
+    fetchLock.current = true;
     setLoadingMore(true);
     try {
       const next = page + 1;
@@ -1453,11 +1462,12 @@ function XploreSectionPanel({ section, isActive, scrollRef, onScroll, onScrollIm
       setHasMore(data.items.length >= 30);
       setVisibleCount((v) => v + PAGE_SIZE);
     } catch {
-      // leave hasMore as-is so the button just retries on next tap
+      // leave hasMore as-is so the button/scroll just retries next time
     } finally {
+      fetchLock.current = false;
       setLoadingMore(false);
     }
-  }, [items, visibleCount, hasMore, loadingMore, page, section]);
+  }, [items, visibleCount, hasMore, page, section]);
 
   // Background poll for newly-dripped items while the tab is open and active.
   useEffect(() => {
@@ -1492,9 +1502,15 @@ function XploreSectionPanel({ section, isActive, scrollRef, onScroll, onScrollIm
   }, [items, interests, section]);
 
   const rafRef = useRef<number | null>(null);
+  // How close to the bottom (px) before we auto-fire the next page load.
+  // Large enough to trigger while there's still a screen or two of buffered
+  // content left, so the fetch has time to land before the user hits the
+  // literal end and sees a blank gap.
+  const LOAD_MORE_THRESHOLD_PX = 900;
   const handleScroll = () => {
     if (!scrollRef.current) return;
-    const y = scrollRef.current.scrollTop;
+    const el = scrollRef.current;
+    const y = el.scrollTop;
     if (rafRef.current === null) {
       rafRef.current = requestAnimationFrame(() => {
         onScrollImmediate(y);
@@ -1503,6 +1519,16 @@ function XploreSectionPanel({ section, isActive, scrollRef, onScroll, onScrollIm
     }
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => onScroll(y), 300);
+
+    // Auto-load more as the user nears the bottom, same underlying call the
+    // "Load more" button makes -- reveals already-buffered items instantly
+    // (no network) and only hits get-xplore live once those run out, exactly
+    // like a manual click would. This never touches the page-1 cache path,
+    // so initial panel load is unaffected either way.
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom < LOAD_MORE_THRESHOLD_PX) {
+      handleLoadMore();
+    }
   };
 
   const filteredItems = useMemo(() => {
