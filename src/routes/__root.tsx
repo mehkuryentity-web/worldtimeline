@@ -12,6 +12,8 @@ import { Analytics } from "@vercel/analytics/react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { useProgressSync } from "../hooks/use-progress-sync";
+import { ProgressSyncPrompt } from "../components/ProgressSyncPrompt";
 
 function NotFoundComponent() {
   return (
@@ -121,11 +123,19 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const { pending, resolveKeepGuest, resolveDiscardGuest } = useProgressSync();
 
   return (
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
+      {pending && (
+        <ProgressSyncPrompt
+          guestState={pending.guestState}
+          onKeep={resolveKeepGuest}
+          onDiscard={resolveDiscardGuest}
+        />
+      )}
     </QueryClientProvider>
   );
 }
