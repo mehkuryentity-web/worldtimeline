@@ -1,5 +1,8 @@
-// Local rewards & interactions store. Persists in localStorage.
-// Will be migrated to Lovable Cloud when backend is enabled.
+// Local rewards & interactions store. Persists in localStorage, and (once
+// signed in) syncs to the `user_progress` table -- see the "Account sync"
+// section near the bottom of this file.
+import { supabase } from "@/integrations/supabase/client";
+import type { Json } from "@/integrations/supabase/types";
 
 export type Action =
   | "open_app"
@@ -173,4 +176,83 @@ export function getCycle() {
 // Convert points to a dollar estimate for display (placeholder rate).
 export function pointsToUSD(points: number): number {
   return Math.round(points * 0.01 * 100) / 100;
+}
+
+// ---------------------------------------------------------------------
+// Account sync (user_progress table)
+//
+// `wt:state:v1` above is purely local/per-browser. Everything below
+// bridges it to a per-account row in Supabase so progress follows a
+// signed-in user across devices, instead of staying stuck on whichever
+// device it was earned on. Kept in this file (not a separate module) so
+// there's one source of truth for what "app state" means.
+// ---------------------------------------------------------------------
+
+// True if the local store has anything worth asking the user about
+// before it gets discarded or overwritten.
+export function hasMeaningfulProgress(state: AppState): boolean {
+  return (
+    state.totalEarned > 0 ||
+    Object.keys(state.saved).length > 0 ||
+    state.history.length > 0 ||
+    state.userPosts.length > 0 ||
+    state.submissions.length > 0
+  );
+}
+
+// Wipes local progress back to empty. Used both when a user chooses to
+// discard guest progress, and on sign-out -- so the next person on a
+// shared device doesn't inherit the previous account's synced data.
+export function resetLocal() {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(KEY);
+  } catch {}
+  window.dispatchEvent(new CustomEvent("wt:state"));
+}
+
+// Additive merge used when a user opts to keep their guest progress:
+// numeric/point history stacks, record maps union (existing account
+// data wins on key collisions since it's the more "official" copy).
+export function mergeStates(accountState: AppState, guestState: AppState): AppState {
+  return {
+    ...empty,
+    points: accountState.points + guestState.points,
+    totalEarned: accountState.totalEarned + guestState.totalEarned,
+    actionsByDay: Object.entries(guestState.actionsByDay).reduce(
+      (acc, [day, count]) => ({ ...acc, [day]: (acc[day] ?? 0) + count }),
+      { ...accountState.actionsByDay }
+    ),
+    articles: { ...guestState.articles, ...accountState.articles },
+    submissions: [...accountState.submissions, ...guestState.submissions],
+    history: [...accountState.history, ...guestState.history]
+      .sort((a, b) => (a.at < b.at ? 1 : -1))
+      .slice(0, 50),
+    saved: { ...guestState.saved, ...accountState.saved },
+    userPosts: [...accountState.userPosts, ...guestState.userPosts],
+    country: accountState.country ?? guestState.country,
+    category: accountState.category ?? guestState.category,
+  };
+}
+
+// Fetches the signed-in user's cloud progress. Returns null if they've
+// never had one saved (brand-new account, or never signed in on any
+// device before).
+export async function pullRemote(userId: string): Promise<AppState | null> {
+  const { data, error } = await supabase
+    .from("user_progress")
+    .select("state")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return { ...empty, ...(data.state as Partial<AppState>) };
+}
+
+// Upserts the given state as the signed-in user's cloud progress.
+export async function pushRemote(userId: string, state: AppState): Promise<void> {
+  await supabase.from("user_progress").upsert({
+    user_id: userId,
+    state: state as unknown as Json,
+    updated_at: new Date().toISOString(),
+  });
 }
