@@ -159,11 +159,11 @@ function useMatrixAnim(text: string, go: boolean) {
    skipped because the DOM nodes already existed.
    ============================================================ */
 function AnimatedText({
-  summary, conclusion, animStyle, shouldAnimate, animKey,
+  summary, conclusion, animStyle, shouldAnimate, animKey, onComplete,
 }: {
   summary: string; conclusion: string;
   animStyle: BriefingAnimation; shouldAnimate: boolean;
-  animKey: string;
+  animKey: string; onComplete?: () => void;
 }) {
   const go = shouldAnimate && animStyle !== "none";
   const fullText = summary + (conclusion ? "\n\n" + conclusion : "");
@@ -176,6 +176,29 @@ function AnimatedText({
   const summaryWords = splitWords(summary);
   const conclusionWords = splitWords(conclusion);
   const summaryWordCount = summaryWords.length;
+
+  // Fires onComplete exactly when each animation style actually finishes
+  // revealing its text -- not on mount, not partway through.
+  const wordStaggerTotalMs = summaryWordCount + conclusionWords.length > 0
+    ? (summaryWordCount + conclusionWords.length - 1) * STAGGER_MS + DURATION_MS
+    : 0;
+
+  useEffect(() => {
+    if (!onComplete) return;
+    if (!go) { onComplete(); return; } // static render (cached/no-animate) is "shown" immediately
+    if (animStyle === "typewriter") {
+      if (twFull.length >= fullText.length) onComplete();
+      return;
+    }
+    if (animStyle === "matrix") {
+      if (matDone) onComplete();
+      return;
+    }
+    if (animStyle === "blur" || animStyle === "fade" || animStyle === "slide") {
+      const t = setTimeout(onComplete, wordStaggerTotalMs);
+      return () => clearTimeout(t);
+    }
+  }, [go, animStyle, twFull, matDone, wordStaggerTotalMs, fullText.length, onComplete]);
 
   function wordSpans(
     words: string[], offset: number, keyPrefix: string,
@@ -350,6 +373,10 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
   const [conclusion, setConclusion] = useState("");
   const [status, setStatus] = useState<"loading" | "ready" | "empty">("loading");
   const [shouldAnimate, setShouldAnimate] = useState(true);
+  // Tracks whether the briefing has actually finished playing out on
+  // screen -- used to gate the guest sign-in CTA so it doesn't appear
+  // mid-animation, only once there's something to react to.
+  const [revealed, setRevealed] = useState(false);
   // Changes every time genuinely new text arrives — forces AnimatedText to remount
   // so CSS animations always restart cleanly from frame 0.
   const [animKey, setAnimKey] = useState(0);
@@ -360,6 +387,27 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
     streamedThisSession.add(key);
     return true;
   }
+
+  // Re-resolve the greeting name whenever the sign-in state actually
+  // changes (sign in / sign out / token refresh) -- independent of the
+  // headlines effect below, which only re-runs when the feed content
+  // changes. Without this, switching accounts mid-session (no full page
+  // reload) left the greeting showing whichever guest/user name was
+  // resolved at the last headlines refresh.
+  useEffect(() => {
+    let alive = true;
+    const { data: sub } = supabase.auth.onAuthStateChange(async () => {
+      const { name, isGuest: guestFlag } = await resolveDisplayName();
+      if (alive) {
+        setGreetingName(name);
+        setIsGuest(guestFlag);
+      }
+    });
+    return () => {
+      alive = false;
+      sub.subscription.unsubscribe();
+    };
+  }, []);
 
   // Order-insensitive signature: a background refetch that returns the
   // same headlines in a different order must NOT be treated as "new" --
@@ -390,6 +438,7 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
     const controller = new AbortController();
 
     async function load() {
+      if (alive) setRevealed(false);
       const key = cacheKeyFor(country, category, mode);
       const cached = getCache(key);
 
@@ -464,8 +513,9 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
       </p>
 
       {status === "loading" && (
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+        <p className="mt-2 flex items-center gap-1.5 text-sm leading-relaxed text-muted-foreground">
           Preparing your briefing...
+          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
         </p>
       )}
       {status === "empty" && (
@@ -481,13 +531,14 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
           animStyle={animStyle}
           shouldAnimate={shouldAnimate}
           animKey={animKey}
+          onComplete={() => setRevealed(true)}
         />
       )}
 
-      {isGuest && (
+      {isGuest && status === "ready" && revealed && (
         <button type="button" onClick={() => { window.location.href = "/auth"; }}
           className="mt-3 text-xs underline text-muted-foreground hover:text-foreground">
-          Sign in for a personalized briefing
+          Sign in for a personalized experience
         </button>
       )}
     </div>
