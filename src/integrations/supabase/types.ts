@@ -14,60 +14,711 @@ export type Database = {
   }
   public: {
     Tables: {
-      news_cache: {
+      ai_article_summaries: {
         Row: {
-          category: string
-          fetched_at: string
+          created_at: string
+          hook: string | null
+          hook_key: string | null
           id: string
-          payload: Json
+          summary: string
         }
         Insert: {
-          category: string
-          fetched_at?: string
-          id?: string
-          payload: Json
+          created_at?: string
+          hook?: string | null
+          hook_key?: string | null
+          id: string
+          summary: string
         }
         Update: {
-          category?: string
-          fetched_at?: string
+          created_at?: string
+          hook?: string | null
+          hook_key?: string | null
           id?: string
-          payload?: Json
+          summary?: string
         }
         Relationships: []
       }
-      profiles: {
+      ai_briefings: {
         Row: {
-          avatar_url: string | null
-          bio: string | null
+          category: string
+          conclusion: string
+          country: string | null
           created_at: string
-          display_name: string | null
+          generated_at: string | null
+          headlines_hash: string
           id: string
-          updated_at: string
-          username: string | null
+          mode: string
+          summary: string
         }
         Insert: {
-          avatar_url?: string | null
-          bio?: string | null
+          category?: string
+          conclusion?: string
+          country?: string | null
           created_at?: string
-          display_name?: string | null
-          id: string
-          updated_at?: string
-          username?: string | null
+          generated_at?: string | null
+          headlines_hash: string
+          id?: string
+          mode?: string
+          summary: string
         }
         Update: {
-          avatar_url?: string | null
-          bio?: string | null
+          category?: string
+          conclusion?: string
+          country?: string | null
           created_at?: string
-          display_name?: string | null
+          generated_at?: string | null
+          headlines_hash?: string
           id?: string
+          mode?: string
+          summary?: string
+        }
+        Relationships: []
+      }
+      ai_video_briefs: {
+        Row: {
+          brief: string
+          created_at: string
+          title_key: string
+          title_label: string
+          video_id: string
+        }
+        Insert: {
+          brief: string
+          created_at?: string
+          title_key: string
+          title_label: string
+          video_id: string
+        }
+        Update: {
+          brief?: string
+          created_at?: string
+          title_key?: string
+          title_label?: string
+          video_id?: string
+        }
+        Relationships: []
+      }
+      api_cache: {
+        Row: {
+          data: Json
+          last_error: string | null
+          last_error_at: string | null
+          last_synced_at: string | null
+          source: string
+          updated_at: string
+        }
+        Insert: {
+          data?: Json
+          last_error?: string | null
+          last_error_at?: string | null
+          last_synced_at?: string | null
+          source: string
           updated_at?: string
-          username?: string | null
+        }
+        Update: {
+          data?: Json
+          last_error?: string | null
+          last_error_at?: string | null
+          last_synced_at?: string | null
+          source?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      feedback: {
+        Row: {
+          category: string | null
+          created_at: string
+          email: string | null
+          id: string
+          message: string
+          user_id: string | null
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          message: string
+          user_id?: string | null
+        }
+        Update: {
+          category?: string | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          message?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      grants_archive: {
+        Row: {
+          amount: number | null
+          category: string | null
+          country: string | null
+          created_at: string
+          currency: string | null
+          deadline: string | null
+          description: string | null
+          fetched_at: string
+          id: string
+          rolling: boolean
+          source: string | null
+          title: string
+          url: string | null
+        }
+        Insert: {
+          amount?: number | null
+          category?: string | null
+          country?: string | null
+          created_at?: string
+          currency?: string | null
+          deadline?: string | null
+          description?: string | null
+          fetched_at?: string
+          id?: string
+          rolling?: boolean
+          source?: string | null
+          title: string
+          url?: string | null
+        }
+        Update: {
+          amount?: number | null
+          category?: string | null
+          country?: string | null
+          created_at?: string
+          currency?: string | null
+          deadline?: string | null
+          description?: string | null
+          fetched_at?: string
+          id?: string
+          rolling?: boolean
+          source?: string | null
+          title?: string
+          url?: string | null
+        }
+        Relationships: []
+      }
+      headline_grounding: {
+        Row: {
+          fetched_at: string
+          snippets: Json
+          title: string
+        }
+        Insert: {
+          fetched_at?: string
+          snippets?: Json
+          title: string
+        }
+        Update: {
+          fetched_at?: string
+          snippets?: Json
+          title?: string
+        }
+        Relationships: []
+      }
+      internships_archive: {
+        Row: {
+          company: string | null
+          country: string | null
+          created_at: string
+          deadline: string | null
+          description: string | null
+          duration: string | null
+          fetched_at: string
+          id: string
+          remote: boolean
+          rolling: boolean
+          source: string | null
+          title: string
+          url: string | null
+        }
+        Insert: {
+          company?: string | null
+          country?: string | null
+          created_at?: string
+          deadline?: string | null
+          description?: string | null
+          duration?: string | null
+          fetched_at?: string
+          id?: string
+          remote?: boolean
+          rolling?: boolean
+          source?: string | null
+          title: string
+          url?: string | null
+        }
+        Update: {
+          company?: string | null
+          country?: string | null
+          created_at?: string
+          deadline?: string | null
+          description?: string | null
+          duration?: string | null
+          fetched_at?: string
+          id?: string
+          remote?: boolean
+          rolling?: boolean
+          source?: string | null
+          title?: string
+          url?: string | null
+        }
+        Relationships: []
+      }
+      job_archive: {
+        Row: {
+          company: string | null
+          description: string | null
+          first_seen_at: string
+          job_id: string
+          job_types: Json | null
+          last_seen_at: string
+          location: string | null
+          logo_url: string | null
+          posted_at: string | null
+          remote: boolean | null
+          source: string
+          tags: Json | null
+          title: string | null
+          url: string | null
+        }
+        Insert: {
+          company?: string | null
+          description?: string | null
+          first_seen_at?: string
+          job_id: string
+          job_types?: Json | null
+          last_seen_at?: string
+          location?: string | null
+          logo_url?: string | null
+          posted_at?: string | null
+          remote?: boolean | null
+          source: string
+          tags?: Json | null
+          title?: string | null
+          url?: string | null
+        }
+        Update: {
+          company?: string | null
+          description?: string | null
+          first_seen_at?: string
+          job_id?: string
+          job_types?: Json | null
+          last_seen_at?: string
+          location?: string | null
+          logo_url?: string | null
+          posted_at?: string | null
+          remote?: boolean | null
+          source?: string
+          tags?: Json | null
+          title?: string | null
+          url?: string | null
+        }
+        Relationships: []
+      }
+      job_comment_likes: {
+        Row: {
+          comment_id: string
+          created_at: string | null
+          user_id: string
+        }
+        Insert: {
+          comment_id: string
+          created_at?: string | null
+          user_id: string
+        }
+        Update: {
+          comment_id?: string
+          created_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_comment_likes_comment_id_fkey"
+            columns: ["comment_id"]
+            isOneToOne: false
+            referencedRelation: "job_comments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      job_comments: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          job_id: string
+          parent_id: string | null
+          user_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          job_id: string
+          parent_id?: string | null
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          job_id?: string
+          parent_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_comments_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "job_comments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      job_matches: {
+        Row: {
+          created_at: string
+          id: string
+          job_apply_url: string | null
+          job_company: string | null
+          job_id: string
+          job_location: string | null
+          job_title: string | null
+          job_type: string | null
+          match_score: string | null
+          matched_interest: string
+          matched_keyword: string | null
+          seen: boolean
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          job_apply_url?: string | null
+          job_company?: string | null
+          job_id: string
+          job_location?: string | null
+          job_title?: string | null
+          job_type?: string | null
+          match_score?: string | null
+          matched_interest: string
+          matched_keyword?: string | null
+          seen?: boolean
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          job_apply_url?: string | null
+          job_company?: string | null
+          job_id?: string
+          job_location?: string | null
+          job_title?: string | null
+          job_type?: string | null
+          match_score?: string | null
+          matched_interest?: string
+          matched_keyword?: string | null
+          seen?: boolean
+          user_id?: string
+        }
+        Relationships: []
+      }
+      job_reactions: {
+        Row: {
+          created_at: string
+          job_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          job_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          job_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      job_reports: {
+        Row: {
+          created_at: string
+          id: string
+          job_id: string
+          reason: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          job_id: string
+          reason?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          job_id?: string
+          reason?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      job_views: {
+        Row: {
+          job_id: string
+          user_id: string
+          viewed_at: string
+        }
+        Insert: {
+          job_id: string
+          user_id: string
+          viewed_at?: string
+        }
+        Update: {
+          job_id?: string
+          user_id?: string
+          viewed_at?: string
+        }
+        Relationships: []
+      }
+      news_archive: {
+        Row: {
+          author: string | null
+          category: string | null
+          country: string | null
+          enriched: boolean
+          external_id: string
+          first_seen_at: string
+          image: string | null
+          last_seen_at: string
+          published_at: string | null
+          source: string
+          summary: string | null
+          title: string
+          url: string | null
+        }
+        Insert: {
+          author?: string | null
+          category?: string | null
+          country?: string | null
+          enriched?: boolean
+          external_id: string
+          first_seen_at?: string
+          image?: string | null
+          last_seen_at?: string
+          published_at?: string | null
+          source: string
+          summary?: string | null
+          title: string
+          url?: string | null
+        }
+        Update: {
+          author?: string | null
+          category?: string | null
+          country?: string | null
+          enriched?: boolean
+          external_id?: string
+          first_seen_at?: string
+          image?: string | null
+          last_seen_at?: string
+          published_at?: string | null
+          source?: string
+          summary?: string | null
+          title?: string
+          url?: string | null
+        }
+        Relationships: []
+      }
+      news_items: {
+        Row: {
+          category: string | null
+          created_at: string | null
+          id: string
+          image: string | null
+          published_at: string | null
+          region: string | null
+          source: string | null
+          summary: string | null
+          title: string | null
+          url: string | null
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string | null
+          id?: string
+          image?: string | null
+          published_at?: string | null
+          region?: string | null
+          source?: string | null
+          summary?: string | null
+          title?: string | null
+          url?: string | null
+        }
+        Update: {
+          category?: string | null
+          created_at?: string | null
+          id?: string
+          image?: string | null
+          published_at?: string | null
+          region?: string | null
+          source?: string | null
+          summary?: string | null
+          title?: string | null
+          url?: string | null
+        }
+        Relationships: []
+      }
+      scholarships_archive: {
+        Row: {
+          award_amount: string | null
+          country: string | null
+          created_at: string
+          deadline: string | null
+          description: string | null
+          fetched_at: string
+          field_of_study: string | null
+          funding_type: string | null
+          id: string
+          level: string | null
+          publish_at: string | null
+          rolling: boolean
+          source: string | null
+          title: string
+          url: string | null
+        }
+        Insert: {
+          award_amount?: string | null
+          country?: string | null
+          created_at?: string
+          deadline?: string | null
+          description?: string | null
+          fetched_at?: string
+          field_of_study?: string | null
+          funding_type?: string | null
+          id?: string
+          level?: string | null
+          publish_at?: string | null
+          rolling?: boolean
+          source?: string | null
+          title: string
+          url?: string | null
+        }
+        Update: {
+          award_amount?: string | null
+          country?: string | null
+          created_at?: string
+          deadline?: string | null
+          description?: string | null
+          fetched_at?: string
+          field_of_study?: string | null
+          funding_type?: string | null
+          id?: string
+          level?: string | null
+          publish_at?: string | null
+          rolling?: boolean
+          source?: string | null
+          title?: string
+          url?: string | null
+        }
+        Relationships: []
+      }
+      user_interests: {
+        Row: {
+          created_at: string
+          interest: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          interest: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          interest?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_progress: {
+        Row: {
+          state: Json
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          state?: Json
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          state?: Json
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      video_archive: {
+        Row: {
+          category_id: string | null
+          channel_title: string | null
+          description: string | null
+          first_seen_at: string
+          last_seen_at: string
+          published_at: string | null
+          region_code: string
+          source: string
+          thumbnail_url: string | null
+          title: string | null
+          video_id: string
+          view_count: number | null
+        }
+        Insert: {
+          category_id?: string | null
+          channel_title?: string | null
+          description?: string | null
+          first_seen_at?: string
+          last_seen_at?: string
+          published_at?: string | null
+          region_code?: string
+          source: string
+          thumbnail_url?: string | null
+          title?: string | null
+          video_id: string
+          view_count?: number | null
+        }
+        Update: {
+          category_id?: string | null
+          channel_title?: string | null
+          description?: string | null
+          first_seen_at?: string
+          last_seen_at?: string
+          published_at?: string | null
+          region_code?: string
+          source?: string
+          thumbnail_url?: string | null
+          title?: string | null
+          video_id?: string
+          view_count?: number | null
         }
         Relationships: []
       }
     }
     Views: {
-      [_ in never]: never
+      job_engagement_counts: {
+        Row: {
+          comment_count: number | null
+          interested_count: number | null
+          job_id: string | null
+          view_count: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       [_ in never]: never
