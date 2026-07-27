@@ -5,6 +5,20 @@ import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
 
 const isLovableApp = typeof window !== "undefined" && window.location.hostname.includes("lovable.app");
+// The Lovable broker's signInWithOAuth only *completes* the sign-in
+// synchronously when running inside an iframe (popup + postMessage back
+// to this window). When the app is opened as a normal top-level page --
+// which is what a real visitor does, even on a lovable.app URL -- it
+// falls back to a full-page redirect to the broker and never returns
+// control to this app to call supabase.auth.setSession(). Nothing else
+// in the app completes that redirect leg, so the sign-in silently never
+// establishes a Supabase session: the UI still treats you as a guest.
+// Only take the broker path when we're actually embedded; otherwise use
+// Supabase's own hosted OAuth flow, which correctly restores the session
+// via detectSessionInUrl on the way back regardless of redirects.
+const isInIframe = typeof window !== "undefined" && (() => {
+  try { return window.self !== window.top; } catch { return true; }
+})();
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
@@ -64,7 +78,7 @@ function AuthPage() {
     setBusy(true);
     setError(null);
     try {
-      if (isLovableApp) {
+      if (isLovableApp && isInIframe) {
         const result = await lovable.auth.signInWithOAuth("google", {
           redirect_uri: window.location.origin,
         });
