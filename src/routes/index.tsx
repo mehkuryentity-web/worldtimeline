@@ -499,12 +499,25 @@ function Home() {
   const [stableBriefingHeadlines, setStableBriefingHeadlines] = useState<
     (string | { title: string; summary?: string })[]
   >(briefingHeadlines);
+  // country/category/mode must move in lockstep with the headlines they were
+  // generated from -- otherwise a fresh `country` (updated synchronously on
+  // tap) can pair with the previous, not-yet-settled country's headlines,
+  // sending a mismatched pair to the briefing (e.g. "Canada" label with
+  // Nigeria's headlines still in flight). Gating all four behind the same
+  // settle condition keeps the card showing the last known-good briefing
+  // until the new country's headlines have actually arrived.
+  const [stableBriefingCountry, setStableBriefingCountry] = useState(country);
+  const [stableBriefingCategory, setStableBriefingCategory] = useState(category);
+  const [stableBriefingMode, setStableBriefingMode] = useState(mode);
 
   useEffect(() => {
     if (!briefingSourceSettled) return;
     setStableBriefingHeadlines(briefingHeadlines);
+    setStableBriefingCountry(country);
+    setStableBriefingCategory(category);
+    setStableBriefingMode(mode);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [briefingSourceSettled, briefingKey]);
+  }, [briefingSourceSettled, briefingKey, country, category, mode]);
 
   const isCustomValid =
     customRange.hours.trim() !== "" ||
@@ -521,9 +534,9 @@ function Home() {
       <main className="mx-auto max-w-md space-y-4 px-4 pt-4 pb-6">
         <AISummaryCard
           headlines={stableBriefingHeadlines}
-          country={country}
-          category={category}
-          mode={mode}
+          country={stableBriefingCountry}
+          category={stableBriefingCategory}
+          mode={stableBriefingMode}
         />
 
         <div className="flex items-center justify-between gap-2">
