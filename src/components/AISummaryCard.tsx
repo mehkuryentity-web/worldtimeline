@@ -249,7 +249,7 @@ function AnimatedText({
   /* typewriter */
   if (animStyle === "typewriter") {
     return (
-      <p className="text-sm leading-relaxed text-foreground font-mono">
+      <p className="text-sm leading-relaxed text-foreground">
         {tw.text}
         {!tw.done && <span className="animate-pulse text-primary">|</span>}
       </p>
@@ -258,10 +258,7 @@ function AnimatedText({
 
   /* matrix */
   if (animStyle === "matrix") {
-    const cls = mat.done ? "text-sm leading-relaxed text-foreground"
-      : "text-sm leading-relaxed font-mono tracking-wide";
-    const style = mat.done ? undefined : { color: "#ffffff" };
-    return <p className={cls} style={style}>{mat.text}</p>;
+    return <p className="text-sm leading-relaxed text-foreground">{mat.text}</p>;
   }
 
   /* blur */
@@ -461,13 +458,6 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
             <p className="text-xs italic text-muted-foreground/70">{footerLine}</p>
           )}
         </div>
-      )}
-
-      {isGuest && (
-        <button type="button" onClick={() => { window.location.href = "/auth"; }}
-          className="mt-3 text-xs underline text-muted-foreground hover:text-foreground">
-          Sign in for a personalized briefing
-        </button>
       )}
     </div>
   );
