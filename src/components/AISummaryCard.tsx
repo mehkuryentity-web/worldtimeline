@@ -3,6 +3,7 @@ import { Sparkles } from "lucide-react";
 import { generateBriefing } from "@/lib/news.functions";
 import { useAppState } from "@/hooks/use-app-state";
 import { useUser } from "@/hooks/use-user";
+import { COUNTRIES } from "@/lib/countries";
 
 const CACHE_KEY_PREFIX = "wt:ai-briefing:v2:";
 const GUEST_ID_KEY = "wt:guest-id:v1";
@@ -55,11 +56,16 @@ function getOrCreateGuestId() {
 }
 
 /* ---- Footer line ---- */
+function resolveCountryName(countryCode: string): string {
+  if (countryCode === "GLOBAL") return "the World";
+  const match = COUNTRIES.find((c) => c.code === countryCode);
+  return match ? match.name : countryCode;
+}
+
 function buildFooterLine(country: string, category: string): string {
   const isTop = category === "Top";
   if (isTop) {
-    const location = country === "Global" ? "the world" : country;
-    return `This is a brief of top happenings across ${location}. Stories will evolve over time.`;
+    return `This is a brief of top happenings across ${resolveCountryName(country)}. Stories will evolve over time.`;
   }
   return `This is a brief of top ${category.toLowerCase()} happenings. Stories will evolve over time.`;
 }
@@ -316,7 +322,7 @@ function AnimatedText({
    ============================================================ */
 export function AISummaryCard({ headlines, country, category, mode }: Props) {
   const { state } = useAppState();
-  const animStyle: BriefingAnimation = (state.briefingAnimation as BriefingAnimation) ?? "matrix";
+  const animStyle: BriefingAnimation = (state.briefingAnimation as BriefingAnimation) ?? "fade";
 
   const { user } = useUser();
   const greetingName = user
