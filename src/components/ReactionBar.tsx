@@ -85,10 +85,11 @@ export function ReactionBar({ item, showReadLink = true, defaultCommentsOpen = f
 
   const share = async () => {
     award("share");
-    const data = { title: item.title, text: item.summary, url: item.url };
+    const shareUrl = `${window.location.origin}/article/${item.id}`;
+    const data = { title: item.title, text: item.summary, url: shareUrl };
     try {
       if (navigator.share) await navigator.share(data);
-      else await navigator.clipboard.writeText(`${item.title} — ${item.url}`);
+      else await navigator.clipboard.writeText(`${item.title} — ${shareUrl}`);
     } catch {
       /* user cancelled */
     }
