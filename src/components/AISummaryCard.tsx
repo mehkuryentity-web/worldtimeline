@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { generateBriefing } from "@/lib/news.functions";
-import { supabase } from "@/integrations/supabase/client";
 import { useAppState } from "@/hooks/use-app-state";
+import { useUser } from "@/hooks/use-user";
 
 const CACHE_KEY_PREFIX = "wt:ai-briefing:v2:";
 const GUEST_ID_KEY = "wt:guest-id:v1";
@@ -52,18 +52,6 @@ function getOrCreateGuestId() {
     localStorage.setItem(GUEST_ID_KEY, f);
     return f;
   } catch { return "Guest_0000"; }
-}
-async function resolveDisplayName(): Promise<{ name: string; isGuest: boolean }> {
-  try {
-    const { data, error } = await supabase.auth.getUser();
-    if (!error && data?.user) {
-      const u = data.user;
-      const name = (u.user_metadata as any)?.full_name || (u.user_metadata as any)?.name ||
-        (u.user_metadata as any)?.username || (u.email ? u.email.split("@")[0] : null) || "there";
-      return { name, isGuest: false };
-    }
-  } catch {}
-  return { name: getOrCreateGuestId(), isGuest: true };
 }
 
 /* ---- Footer line ---- */
@@ -330,8 +318,12 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
   const { state } = useAppState();
   const animStyle: BriefingAnimation = (state.briefingAnimation as BriefingAnimation) ?? "matrix";
 
-  const [greetingName, setGreetingName] = useState("there");
-  const [isGuest, setIsGuest] = useState(true);
+  const { user } = useUser();
+  const greetingName = user
+    ? ((user.user_metadata as any)?.full_name || (user.user_metadata as any)?.name ||
+        (user.user_metadata as any)?.username || (user.email ? user.email.split("@")[0] : null) || "there")
+    : getOrCreateGuestId();
+  const isGuest = !user;
   const [summary, setSummary] = useState("");
   const [conclusion, setConclusion] = useState("");
   const [status, setStatus] = useState<"loading" | "ready" | "empty">("loading");
@@ -349,19 +341,6 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
     streamedThisSession.add(key);
     return true;
   }
-
-  // Resolve display name once on mount — fully decoupled from the
-  // briefing load cycle so it never re-flashes on country/category/mode changes.
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      const { name, isGuest: guestFlag } = await resolveDisplayName();
-      if (!alive) return;
-      setGreetingName(name);
-      setIsGuest(guestFlag);
-    })();
-    return () => { alive = false; };
-  }, []);
 
   // Briefing load — cache first, fetch only when cache is missing/expired.
   useEffect(() => {
