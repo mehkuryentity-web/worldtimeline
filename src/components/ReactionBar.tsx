@@ -85,7 +85,7 @@ export function ReactionBar({ item, showReadLink = true, defaultCommentsOpen = f
 
   const share = async () => {
     award("share");
-    const shareUrl = `${window.location.origin}/article/${item.id}`;
+    const shareUrl = `${window.location.origin}/article/${encodeURIComponent(item.id)}`;
     const data = { title: item.title, text: item.summary, url: shareUrl };
     try {
       if (navigator.share) await navigator.share(data);
