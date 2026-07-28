@@ -15,11 +15,16 @@ export function useUser() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // onAuthStateChange fires an initial event (with whatever session is
+    // already persisted in local storage) immediately on subscribe -- no
+    // network round-trip required. We previously ALSO called the
+    // network-validating supabase.auth.getUser() for the first read; if
+    // that call was ever slow or transiently errored, it silently left
+    // `user` as null (guest/"Anonymous Reader") with nothing to correct
+    // it until some unrelated future auth event happened to fire. Relying
+    // on the subscription alone removes that failure mode entirely.
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
-    });
-    supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user ?? null);
       setLoading(false);
     });
     return () => sub.subscription.unsubscribe();
