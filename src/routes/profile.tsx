@@ -290,7 +290,7 @@ function ProfilePage() {
                   { value: "none",       label: "Instant",      desc: "Text appears all at once" },
                 ] as { value: BriefingAnimation; label: string; desc: string }[]
               ).map(({ value, label, desc }) => {
-                const active = (state.briefingAnimation ?? "blur") === value;
+                const active = (state.briefingAnimation ?? "fade") === value;
                 return (
                   <button
                     key={value}
