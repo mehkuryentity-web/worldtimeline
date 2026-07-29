@@ -8,6 +8,8 @@ import {
   Bookmark,
   ExternalLink,
   CornerDownRight,
+  Heart,
+  User as UserIcon,
 } from "lucide-react";
 import type { NewsItem } from "@/lib/mock-news";
 import { useAppState } from "@/hooks/use-app-state";
@@ -17,6 +19,7 @@ import {
   getComments,
   addComment,
   getCommentCount,
+  toggleCommentLike,
   type NewsComment,
 } from "@/lib/news-engagement";
 
@@ -32,8 +35,6 @@ export function ReactionBar({ item, showReadLink = true, defaultCommentsOpen = f
   const navigate = useNavigate();
   const { state, award, update } = useAppState();
   const rawArticle = state.articles[item.id];
-  // Guard against a partial/legacy entry -- see original note: without
-  // this, a stale local record with no fields throws and crashes the page.
   const a = {
     reaction: rawArticle?.reaction ?? null,
   };
@@ -61,9 +62,9 @@ export function ReactionBar({ item, showReadLink = true, defaultCommentsOpen = f
     navigate({ to: "/auth" });
   };
 
-  const loadComments = async () => {
+  const loadComments = async (uid: string | null = userId) => {
     setLoadingComments(true);
-    const data = await getComments(item.id);
+    const data = await getComments(item.id, uid);
     setComments(data);
     setLoadingComments(false);
   };
@@ -108,12 +109,45 @@ export function ReactionBar({ item, showReadLink = true, defaultCommentsOpen = f
     if (!userId) return requireAuth();
     const text = commentText.trim();
     if (!text) return;
-    await addComment(item.id, userId, text, replyTo);
-    award("comment");
-    setCommentText("");
-    setReplyTo(null);
-    setCommentCount((n) => n + 1);
-    loadComments();
+    try {
+      await addComment(item.id, userId, text, replyTo);
+      award("comment");
+      setCommentText("");
+      setReplyTo(null);
+      setCommentCount((n) => n + 1);
+      loadComments();
+    } catch (err) {
+      // Never let a failed post crash the whole page -- worst case, the
+      // comment silently doesn't post and the input stays as-is so the
+      // user can retry.
+      console.error("Failed to post comment", err);
+    }
+  };
+
+  const toggleLike = async (comment: NewsComment) => {
+    if (!userId) return requireAuth();
+    const wasLiked = comment.likedByMe;
+    // Optimistic update -- don't wait on a full reload for a like tap.
+    setComments((prev) =>
+      prev.map((c) =>
+        c.id === comment.id
+          ? { ...c, likedByMe: !wasLiked, likeCount: c.likeCount + (wasLiked ? -1 : 1) }
+          : c
+      )
+    );
+    try {
+      await toggleCommentLike(comment.id, userId, wasLiked);
+    } catch (err) {
+      console.error("Failed to toggle comment like", err);
+      // Revert on failure
+      setComments((prev) =>
+        prev.map((c) =>
+          c.id === comment.id
+            ? { ...c, likedByMe: wasLiked, likeCount: c.likeCount + (wasLiked ? 1 : -1) }
+            : c
+        )
+      );
+    }
   };
 
   const share = async () => {
@@ -130,6 +164,36 @@ export function ReactionBar({ item, showReadLink = true, defaultCommentsOpen = f
 
   const topLevelComments = comments.filter((c) => !c.parentId);
   const repliesOf = (id: string) => comments.filter((c) => c.parentId === id);
+
+  const CommentAuthor = ({ c }: { c: NewsComment }) => (
+    <div className="flex items-center gap-1.5">
+      {c.authorAvatarUrl ? (
+        <img
+          src={c.authorAvatarUrl}
+          alt=""
+          className="h-5 w-5 shrink-0 rounded-full border border-border object-cover"
+        />
+      ) : (
+        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border bg-surface-1">
+          <UserIcon className="h-3 w-3 text-muted-foreground" />
+        </div>
+      )}
+      <span className="text-xs font-medium">{c.authorName}</span>
+    </div>
+  );
+
+  const CommentLikeButton = ({ c }: { c: NewsComment }) => (
+    <button
+      onClick={() => toggleLike(c)}
+      className={`flex items-center gap-1 hover:text-primary ${
+        c.likedByMe ? "text-primary" : ""
+      }`}
+      aria-label={c.likedByMe ? "Unlike" : "Like"}
+    >
+      <Heart className={`h-3 w-3 ${c.likedByMe ? "fill-current" : ""}`} />
+      {c.likeCount > 0 && <span>{c.likeCount}</span>}
+    </button>
+  );
 
   return (
     <>
@@ -233,9 +297,11 @@ export function ReactionBar({ item, showReadLink = true, defaultCommentsOpen = f
               topLevelComments.map((c) => (
                 <div key={c.id} className="space-y-1.5">
                   <div className="rounded-md bg-surface-2 px-3 py-2">
-                    <p className="text-sm">{c.content}</p>
-                    <div className="mt-1 flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <CommentAuthor c={c} />
+                    <p className="mt-1 text-sm">{c.content}</p>
+                    <div className="mt-1 flex items-center gap-3 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                       <span>{timeAgo(c.createdAt)}</span>
+                      <CommentLikeButton c={c} />
                       <button onClick={() => setReplyTo(c.id)} className="hover:text-primary">
                         Reply
                       </button>
@@ -245,10 +311,12 @@ export function ReactionBar({ item, showReadLink = true, defaultCommentsOpen = f
                     <div key={r.id} className="ml-4 flex items-start gap-1.5">
                       <CornerDownRight className="mt-2 h-3 w-3 shrink-0 text-muted-foreground" />
                       <div className="flex-1 rounded-md bg-surface-2 px-3 py-2">
-                        <p className="text-sm">{r.content}</p>
-                        <span className="mt-1 block font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                          {timeAgo(r.createdAt)}
-                        </span>
+                        <CommentAuthor c={r} />
+                        <p className="mt-1 text-sm">{r.content}</p>
+                        <div className="mt-1 flex items-center gap-3 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <span>{timeAgo(r.createdAt)}</span>
+                          <CommentLikeButton c={r} />
+                        </div>
                       </div>
                     </div>
                   ))}
