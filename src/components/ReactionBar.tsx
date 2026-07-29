@@ -1,8 +1,24 @@
-import { useState } from "react";
-import { ThumbsUp, ThumbsDown, MessageCircle, Share2, Bookmark, ExternalLink } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import {
+  ThumbsUp,
+  ThumbsDown,
+  MessageCircle,
+  Share2,
+  Bookmark,
+  ExternalLink,
+  CornerDownRight,
+} from "lucide-react";
 import type { NewsItem } from "@/lib/mock-news";
 import { useAppState } from "@/hooks/use-app-state";
 import { timeAgo } from "@/lib/format";
+import {
+  getCurrentUserId,
+  getComments,
+  addComment,
+  getCommentCount,
+  type NewsComment,
+} from "@/lib/news-engagement";
 
 interface Props {
   item: NewsItem;
@@ -13,19 +29,50 @@ interface Props {
 }
 
 export function ReactionBar({ item, showReadLink = true, defaultCommentsOpen = false }: Props) {
+  const navigate = useNavigate();
   const { state, award, update } = useAppState();
   const rawArticle = state.articles[item.id];
-  // Guard against a partial/legacy entry (e.g. `{ reaction: "like" }` with no
-  // `comments` array) -- without this, spreading `a.comments` in
-  // submitComment throws and crashes the whole page instead of just this
-  // comment.
+  // Guard against a partial/legacy entry -- see original note: without
+  // this, a stale local record with no fields throws and crashes the page.
   const a = {
     reaction: rawArticle?.reaction ?? null,
-    comments: Array.isArray(rawArticle?.comments) ? rawArticle.comments : [],
   };
   const isSaved = Boolean(state.saved?.[item.id]);
+
   const [openComments, setOpenComments] = useState(defaultCommentsOpen);
   const [commentText, setCommentText] = useState("");
+  const [userId, setUserId] = useState<string | null>(null);
+  const [comments, setComments] = useState<NewsComment[]>([]);
+  const [commentCount, setCommentCount] = useState(0);
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [replyTo, setReplyTo] = useState<string | null>(null);
+  const userChecked = useRef(false);
+
+  useEffect(() => {
+    if (userChecked.current) return;
+    userChecked.current = true;
+    getCurrentUserId().then(setUserId);
+    getCommentCount(item.id).then(setCommentCount);
+    // Runs once per card mount, not on every re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.id]);
+
+  const requireAuth = () => {
+    navigate({ to: "/auth" });
+  };
+
+  const loadComments = async () => {
+    setLoadingComments(true);
+    const data = await getComments(item.id);
+    setComments(data);
+    setLoadingComments(false);
+  };
+
+  const toggleComments = () => {
+    const next = !openComments;
+    setOpenComments(next);
+    if (next && comments.length === 0) loadComments();
+  };
 
   const toggleSave = () => {
     update((s) => {
@@ -52,35 +99,21 @@ export function ReactionBar({ item, showReadLink = true, defaultCommentsOpen = f
     const wasSame = a.reaction === r;
     update((s) => ({
       ...s,
-      articles: { ...s.articles, [item.id]: { ...a, reaction: wasSame ? null : r } },
+      articles: { ...s.articles, [item.id]: { ...(s.articles[item.id] ?? {}), reaction: wasSame ? null : r } },
     }));
     if (!wasSame) award(r);
   };
 
-  const submitComment = () => {
-    if (!commentText.trim()) return;
-    try {
-      update((s) => ({
-        ...s,
-        articles: {
-          ...s.articles,
-          [item.id]: {
-            ...a,
-            comments: [
-              { id: crypto.randomUUID(), at: new Date().toISOString(), text: commentText.trim() },
-              ...a.comments,
-            ],
-          },
-        },
-      }));
-      award("comment");
-      setCommentText("");
-    } catch (err) {
-      // Never let a comment-post failure crash the whole page to the
-      // generic error boundary -- worst case, the comment silently
-      // doesn't post and the input stays as-is so the user can retry.
-      console.error("Failed to post comment", err);
-    }
+  const submitComment = async () => {
+    if (!userId) return requireAuth();
+    const text = commentText.trim();
+    if (!text) return;
+    await addComment(item.id, userId, text, replyTo);
+    award("comment");
+    setCommentText("");
+    setReplyTo(null);
+    setCommentCount((n) => n + 1);
+    loadComments();
   };
 
   const share = async () => {
@@ -94,6 +127,9 @@ export function ReactionBar({ item, showReadLink = true, defaultCommentsOpen = f
       /* user cancelled */
     }
   };
+
+  const topLevelComments = comments.filter((c) => !c.parentId);
+  const repliesOf = (id: string) => comments.filter((c) => c.parentId === id);
 
   return (
     <>
@@ -118,13 +154,13 @@ export function ReactionBar({ item, showReadLink = true, defaultCommentsOpen = f
             <ThumbsDown className="h-3.5 w-3.5" />
           </button>
           <button
-            onClick={() => setOpenComments((v) => !v)}
+            onClick={toggleComments}
             className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground"
             aria-label="Comments"
           >
             <MessageCircle className="h-3.5 w-3.5" />
-            {a.comments.length > 0 && (
-              <span className="font-mono tabular-nums">{a.comments.length}</span>
+            {commentCount > 0 && (
+              <span className="font-mono tabular-nums">{commentCount}</span>
             )}
           </button>
           <button
@@ -160,34 +196,62 @@ export function ReactionBar({ item, showReadLink = true, defaultCommentsOpen = f
 
       {openComments && (
         <div className="border-t border-border bg-background/30 px-3 py-3">
+          {replyTo && (
+            <button
+              onClick={() => setReplyTo(null)}
+              className="mb-2 font-mono text-[9px] uppercase tracking-wider text-primary"
+            >
+              Replying ×
+            </button>
+          )}
           <div className="flex gap-2">
             <input
               value={commentText}
               onChange={(e) => setCommentText(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && submitComment()}
-              placeholder="Add a comment…"
-              className="flex-1 rounded-md border border-border bg-surface-2 px-3 py-2 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+              placeholder={userId ? "Add a comment…" : "Sign in to comment"}
+              disabled={!userId}
+              className="flex-1 rounded-md border border-border bg-surface-2 px-3 py-2 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none disabled:opacity-50"
             />
             <button
               onClick={submitComment}
-              className="rounded-md bg-primary px-3 py-2 font-mono text-[11px] uppercase tracking-wider text-primary-foreground"
+              className="rounded-md bg-primary px-3 py-2 font-mono text-[11px] uppercase tracking-wider text-primary-foreground disabled:opacity-50"
             >
               Post
             </button>
           </div>
           <div className="mt-3 space-y-2">
-            {a.comments.length === 0 ? (
+            {loadingComments ? (
+              <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                Loading comments...
+              </p>
+            ) : topLevelComments.length === 0 ? (
               <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                 Be the first to comment · +5 pts
               </p>
             ) : (
-              a.comments.map((c) => (
-                <div key={c.id} className="rounded-md bg-surface-2 px-3 py-2">
-                  <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                    <span className="text-primary">you</span>
-                    <span>· {timeAgo(c.at)}</span>
+              topLevelComments.map((c) => (
+                <div key={c.id} className="space-y-1.5">
+                  <div className="rounded-md bg-surface-2 px-3 py-2">
+                    <p className="text-sm">{c.content}</p>
+                    <div className="mt-1 flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <span>{timeAgo(c.createdAt)}</span>
+                      <button onClick={() => setReplyTo(c.id)} className="hover:text-primary">
+                        Reply
+                      </button>
+                    </div>
                   </div>
-                  <p className="mt-1 text-sm">{c.text}</p>
+                  {repliesOf(c.id).map((r) => (
+                    <div key={r.id} className="ml-4 flex items-start gap-1.5">
+                      <CornerDownRight className="mt-2 h-3 w-3 shrink-0 text-muted-foreground" />
+                      <div className="flex-1 rounded-md bg-surface-2 px-3 py-2">
+                        <p className="text-sm">{r.content}</p>
+                        <span className="mt-1 block font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                          {timeAgo(r.createdAt)}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ))
             )}
