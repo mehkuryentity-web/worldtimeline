@@ -3,7 +3,6 @@ import { Sparkles } from "lucide-react";
 import { generateBriefing } from "@/lib/news.functions";
 import { useAppState } from "@/hooks/use-app-state";
 import { useUser } from "@/hooks/use-user";
-import { COUNTRIES } from "@/lib/countries";
 
 const CACHE_KEY_PREFIX = "wt:ai-briefing:v2:";
 const GUEST_ID_KEY = "wt:guest-id:v1";
@@ -23,8 +22,27 @@ const MATRIX_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&!?";
 
 export type BriefingAnimation = "blur" | "typewriter" | "fade" | "slide" | "matrix" | "none";
 
-interface CachedBriefing { summary: string; conclusion: string; savedAt: number; }
-interface Props { headlines: string[]; country: string; category: string; mode: string; }
+export interface PinnedArticle {
+  title: string; summary: string; url: string; source: string; image: string;
+  id: string; category: string; region: string; publishedAt: string; ingestedAt: string;
+}
+
+interface CachedBriefing {
+  summary: string; conclusion: string; articles: PinnedArticle[];
+  // savedAt holds the BACKEND's generated_at (ms since epoch), not the local
+  // fetch time -- this is what makes the countdown identical for every user
+  // looking at the same country/category/mode, instead of each device
+  // running its own independent hour from whenever it happened to load.
+  savedAt: number;
+}
+interface Props {
+  headlines: (string | { title: string; summary?: string })[];
+  country: string; category: string; mode: string;
+  // Bubbles the pinned article set up to the parent feed so it can render
+  // the "Covered in this briefing" strip and exclude those articles from
+  // resurfacing further down the feed.
+  onArticlesLoaded?: (articles: PinnedArticle[]) => void;
+}
 
 /* ---- Cache helpers ---- */
 function cacheKeyFor(c: string, cat: string, m: string) { return `${CACHE_KEY_PREFIX}${c}|${cat}|${m}`; }
@@ -36,8 +54,10 @@ function getCache(key: string): CachedBriefing | null {
     return Date.now() - p.savedAt > ONE_HOUR_MS ? null : p;
   } catch { return null; }
 }
-function setCache(key: string, summary: string, conclusion: string) {
-  try { localStorage.setItem(key, JSON.stringify({ summary, conclusion, savedAt: Date.now() })); } catch {}
+function setCache(key: string, summary: string, conclusion: string, articles: PinnedArticle[], generatedAtMs: number) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ summary, conclusion, articles, savedAt: generatedAtMs }));
+  } catch {}
 }
 
 /* ---- Greeting / guest ---- */
@@ -56,19 +76,7 @@ function getOrCreateGuestId() {
 }
 
 /* ---- Footer line ---- */
-function resolveCountryName(countryCode: string): string {
-  if (countryCode === "GLOBAL") return "the World";
-  const match = COUNTRIES.find((c) => c.code === countryCode);
-  return match ? match.name : countryCode;
-}
-
-function buildFooterLine(country: string, category: string): string {
-  const isTop = category === "Top";
-  if (isTop) {
-    return `This is a brief of top happenings across ${resolveCountryName(country)}. Stories will evolve over time.`;
-  }
-  return `This is a brief of top ${category.toLowerCase()} happenings. Stories will evolve over time.`;
-}
+const FOOTER_LINE = "Based on today's top stories...";
 
 /* ---- Refresh countdown ---- */
 function formatRefreshLabel(savedAt: number | null): string | null {
@@ -320,7 +328,7 @@ function AnimatedText({
 /* ============================================================
    MAIN COMPONENT
    ============================================================ */
-export function AISummaryCard({ headlines, country, category, mode }: Props) {
+export function AISummaryCard({ headlines, country, category, mode, onArticlesLoaded }: Props) {
   const { state } = useAppState();
   const animStyle: BriefingAnimation = (state.briefingAnimation as BriefingAnimation) ?? "fade";
 
@@ -349,9 +357,24 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
   }
 
   // Briefing load — cache first, fetch only when cache is missing/expired.
+  // NOTE: this effect also self-schedules its own re-run once the cache TTL
+  // elapses, so the card actually refreshes while it sits mounted on screen —
+  // it no longer depends on the user changing tabs/props to notice expiry.
   useEffect(() => {
     let alive = true;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     setAnimationComplete(false);
+
+    function scheduleAutoRefresh(fromSavedAt: number) {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      const msUntilExpiry = ONE_HOUR_MS - (Date.now() - fromSavedAt);
+      // Fire slightly after the TTL boundary (1s buffer) so getCache() has
+      // already invalidated the entry by the time we re-check it.
+      const delay = Math.max(1000, msUntilExpiry + 1000);
+      refreshTimer = setTimeout(() => {
+        if (alive) load();
+      }, delay);
+    }
 
     async function load() {
       const key = cacheKeyFor(country, category, mode);
@@ -364,6 +387,8 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
         setSavedAt(cached.savedAt);
         setAnimKey((k) => k + 1);
         setStatus("ready");
+        onArticlesLoaded?.(cached.articles || []);
+        scheduleAutoRefresh(cached.savedAt);
         return; // valid cache hit — skip the network call entirely
       }
 
@@ -373,24 +398,32 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
       if (!alive) return;
 
       if (typeof res?.summary === "string" && res.summary.trim().length > 0) {
-        const now = Date.now();
+        // Prefer the backend's generated_at (shared/synced across every user
+        // looking at this same view) -- only fall back to local time if the
+        // response is missing it for some reason.
+        const generatedAtMs = res.generated_at ? new Date(res.generated_at).getTime() : Date.now();
+        const articles: PinnedArticle[] = Array.isArray(res.articles) ? res.articles : [];
         setShouldAnimate(decideAnimate(res.summary, res.conclusion || ""));
         setSummary(res.summary);
         setConclusion(res.conclusion || "");
-        setCache(key, res.summary, res.conclusion || "");
-        setSavedAt(now);
+        setCache(key, res.summary, res.conclusion || "", articles, generatedAtMs);
+        setSavedAt(generatedAtMs);
         setAnimKey((k) => k + 1);
         setStatus("ready");
+        onArticlesLoaded?.(articles);
+        scheduleAutoRefresh(generatedAtMs);
       } else {
         setStatus("empty");
+        onArticlesLoaded?.([]);
       }
     }
 
     load();
-    return () => { alive = false; };
+    return () => { alive = false; if (refreshTimer) clearTimeout(refreshTimer); };
   }, [country, category, mode, headlines.join("|")]);
 
   // Live "refreshes in X min" countdown — ticks every 60s, resets when savedAt changes.
+  // (Purely cosmetic label now — the actual refetch is handled by the effect above.)
   useEffect(() => {
     setRefreshLabel(formatRefreshLabel(savedAt));
     if (savedAt == null) return;
@@ -401,7 +434,6 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
   }, [savedAt]);
 
   const mergedText = summary + (conclusion ? " " + conclusion : "");
-  const footerLine = buildFooterLine(country, category);
   const showFooter = status === "ready" && animationComplete;
 
   return (
@@ -440,7 +472,7 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
             onComplete={() => setAnimationComplete(true)}
           />
           {showFooter && (
-            <p className="text-xs italic text-muted-foreground/70">{footerLine}</p>
+            <p className="text-xs italic text-muted-foreground/70">{FOOTER_LINE}</p>
           )}
         </div>
       )}
