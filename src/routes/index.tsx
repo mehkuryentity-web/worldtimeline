@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
-import { AISummaryCard } from "@/components/AISummaryCard";
+import { AISummaryCard, type PinnedArticle } from "@/components/AISummaryCard";
 import { CategoryTabs } from "@/components/CategoryTabs";
 import { CountrySelector } from "@/components/CountrySelector";
 import { NewsCard } from "@/components/NewsCard";
@@ -51,6 +51,25 @@ type Mode =
   | "1h"
   | "24h"
   | "custom";
+
+// Headline objects sent to the briefing now carry full article metadata, not
+// just title/summary -- get-briefing stores the top slice of these verbatim
+// as the "pinned" article set for this briefing (see ai_briefings.articles),
+// which is what powers the "Covered in this briefing" feed strip below.
+type BriefingHeadline =
+  | string
+  | {
+      title: string;
+      summary?: string;
+      url?: string;
+      source?: string;
+      image?: string;
+      id?: string;
+      category?: string;
+      region?: string;
+      publishedAt?: string;
+      ingestedAt?: string;
+    };
 
 function Home() {
   const { state, award, update } = useAppState();
@@ -300,6 +319,32 @@ function Home() {
           return age <= windowMs;
         });
 
+  // ---- PINNED "COVERED IN THIS BRIEFING" ARTICLES ----
+  // Populated by AISummaryCard once its briefing (cached or freshly
+  // generated) resolves -- these are the exact articles that briefing was
+  // built from, per get-briefing's stored `articles` snapshot. Empty for
+  // the Videos tab by design (videos don't map onto NewsCard's shape).
+  const [pinnedArticles, setPinnedArticles] = useState<PinnedArticle[]>([]);
+
+  const pinnedIds = new Set(
+    pinnedArticles.map((a) => a.id).filter((id): id is string => Boolean(id))
+  );
+
+  const pinnedNewsItems: NewsItem[] = pinnedArticles
+    .filter((a) => a.id && a.url) // only render entries we have enough data to build a real card from
+    .map((a) => ({
+      id: a.id,
+      category: (a.category || category) as Category,
+      title: a.title,
+      source: a.source,
+      region: a.region,
+      publishedAt: a.publishedAt,
+      ingestedAt: a.ingestedAt || undefined,
+      summary: a.summary,
+      url: a.url,
+      image: a.image || undefined,
+    }));
+
   type FeedEntry = { publishedAt: string; node: JSX.Element };
 
   // Fixed cadence instead of a pure chronological merge: YouTube's trending
@@ -331,9 +376,16 @@ function Home() {
     // what the current article count actually supports are held back
     // rather than dumped back-to-back at the end -- that pile-up was the
     // bug. They'll surface naturally as more articles load via Load More.
+    //
+    // Articles already shown up top in the "Covered in this briefing" strip
+    // are excluded here so they don't repeat further down the feed.
     let videoIdx = 0;
 
-    items.forEach((item, i) => {
+    const feedItems = pinnedIds.size
+      ? items.filter((item) => !pinnedIds.has(item.id))
+      : items;
+
+    feedItems.forEach((item, i) => {
       feedEntries.push({
         publishedAt: item.publishedAt,
         node: <NewsCard key={`a-${item.id}`} item={item} useIngestedTime={mode !== "all"} />,
@@ -462,19 +514,34 @@ function Home() {
   // instead -- same pipeline, different "headlines" content. Everywhere
   // else, real category-filtered article titles as before.
   // Videos keeps the pre-formatted string shape (get-briefing accepts both
-  // plain strings and {title, summary} objects). Article headlines now also
-  // carry each item's existing `summary` field alongside the title, so the
-  // briefing has real article context to ground against instead of a bare
-  // title -- this reduces both stale-knowledge errors (e.g. calling a
-  // current officeholder "former") and fabricated details, since the model
-  // has actual current-events text to defer to instead of guessing.
-  const briefingHeadlines: (string | { title: string; summary?: string })[] =
+  // plain strings and {title, summary, ...} objects). Article headlines now
+  // also carry each item's full metadata (url, source, image, id, category,
+  // region, publishedAt, ingestedAt) alongside title/summary -- get-briefing
+  // stores this top slice verbatim as the briefing's pinned article set,
+  // which is what renders as "Covered in this briefing" below, and having
+  // the real summary text also grounds the briefing itself against stale-
+  // knowledge errors (e.g. calling a current officeholder "former") and
+  // fabricated details, since the model has actual current-events text to
+  // defer to instead of guessing. Slice bumped to 8 to match get-briefing's
+  // TOP_N, so the full pinnable set actually reaches the backend.
+  const briefingHeadlines: BriefingHeadline[] =
     category === "Videos"
       ? sortedVideos.slice(0, 5).map((v) => {
           const views = formatViewCount(v.viewCount);
           return `${v.title} — ${v.channelTitle}${views ? ` (${views})` : ""}`;
         })
-      : items.slice(0, 6).map((i) => ({ title: i.title, summary: i.summary }));
+      : items.slice(0, 8).map((i) => ({
+          title: i.title,
+          summary: i.summary,
+          url: i.url,
+          source: i.source,
+          image: i.image,
+          id: i.id,
+          category: i.category,
+          region: i.region,
+          publishedAt: i.publishedAt,
+          ingestedAt: i.ingestedAt,
+        }));
 
   // ---- BRIEFING SETTLE GATE ----
   // React Query paints cached/stale data immediately on mount, then often
@@ -496,9 +563,9 @@ function Home() {
   const briefingKey = briefingHeadlines
     .map((h) => (typeof h === "string" ? h : `${h.title}::${h.summary ?? ""}`))
     .join("|");
-  const [stableBriefingHeadlines, setStableBriefingHeadlines] = useState<
-    (string | { title: string; summary?: string })[]
-  >(briefingHeadlines);
+  const [stableBriefingHeadlines, setStableBriefingHeadlines] = useState<BriefingHeadline[]>(
+    briefingHeadlines
+  );
   // country/category/mode must move in lockstep with the headlines they were
   // generated from -- otherwise a fresh `country` (updated synchronously on
   // tap) can pair with the previous, not-yet-settled country's headlines,
@@ -537,6 +604,7 @@ function Home() {
           country={stableBriefingCountry}
           category={stableBriefingCategory}
           mode={stableBriefingMode}
+          onArticlesLoaded={setPinnedArticles}
         />
 
         <div className="flex items-center justify-between gap-2">
@@ -597,6 +665,17 @@ function Home() {
         <h2 className="text-[10px] uppercase text-muted-foreground">
           {countryMeta.flag} {countryMeta.name} · {category}
         </h2>
+
+        {pinnedNewsItems.length > 0 && category !== "Videos" && (
+          <div className="space-y-3">
+            <h3 className="text-[10px] uppercase tracking-widest text-muted-foreground/70">
+              Covered in this briefing
+            </h3>
+            {pinnedNewsItems.map((item) => (
+              <NewsCard key={`pinned-${item.id}`} item={item} />
+            ))}
+          </div>
+        )}
 
         {isLoading ? (
           hasLoadedOnce ? (
