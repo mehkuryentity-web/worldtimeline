@@ -58,6 +58,17 @@ export function CountrySelector({ value, onChange }: Props) {
   const recentCodes = new Set(recent.map((c) => c.code));
   const restList = isSearching ? filtered : filtered.filter((c) => !recentCodes.has(c.code));
 
+  function isLow(c: Country): boolean {
+    const count = coverage?.[c.code];
+    return typeof count === "number" && count < LOW_COVERAGE_THRESHOLD;
+  }
+
+  // COUNTRIES is already alphabetical, and filtering preserves order —
+  // so each group stays alphabetical, low-coverage just sinks to its own
+  // section at the bottom instead of interleaving with well-covered ones.
+  const wellCovered = restList.filter((c) => !isLow(c));
+  const lowCoverage = restList.filter((c) => isLow(c));
+
   function handleSelect(code: string) {
     onChange(code);
     pushRecent(code);
@@ -67,9 +78,6 @@ export function CountrySelector({ value, onChange }: Props) {
 
   function renderRow(c: Country) {
     const active = c.code === value;
-    const articleCount = coverage?.[c.code];
-    const isLowCoverage =
-      typeof articleCount === "number" && articleCount < LOW_COVERAGE_THRESHOLD;
 
     return (
       <button
@@ -82,12 +90,6 @@ export function CountrySelector({ value, onChange }: Props) {
         <span className="flex items-center gap-2">
           <span className="text-base leading-none">{c.flag}</span>
           <span>{c.name}</span>
-          {isLowCoverage && (
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-amber-500/70"
-              title="Low coverage — fewer articles right now"
-            />
-          )}
         </span>
         {active && <Check className="h-3.5 w-3.5" />}
       </button>
@@ -131,7 +133,17 @@ export function CountrySelector({ value, onChange }: Props) {
             </>
           )}
 
-          {restList.map(renderRow)}
+          {wellCovered.map(renderRow)}
+
+          {lowCoverage.length > 0 && (
+            <>
+              <div className="my-1 border-t border-border" />
+              <div className="px-3 pt-2 pb-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                Low coverage
+              </div>
+              {lowCoverage.map(renderRow)}
+            </>
+          )}
 
           {filtered.length === 0 && (
             <div className="px-3 py-4 text-center font-mono text-[11px] text-muted-foreground">
