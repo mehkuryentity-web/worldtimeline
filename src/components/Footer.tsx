@@ -1,5 +1,5 @@
 import React from "react";
-import { useAppStats } from "@/hooks/useAppStats";
+import { useAppStats } from "@/hooks/use-app-stats";
 
 interface FooterProps {
   appVersion?: string;
