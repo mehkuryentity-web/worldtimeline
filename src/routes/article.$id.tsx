@@ -6,6 +6,7 @@ import { BottomNav } from "@/components/BottomNav";
 import { ReactionBar } from "@/components/ReactionBar";
 import { getCachedArticle, cacheArticles, type NewsItem, type Category } from "@/lib/mock-news";
 import { supabase } from "@/integrations/supabase/client";
+import { ArticleCover } from "@/components/ArticleCover";
 
 export const Route = createFileRoute("/article/$id")({
   component: ArticlePage,
@@ -144,6 +145,7 @@ export function ArticlePage() {
   const [item, setItem] = useState<NewsItem | null>(() => getCachedArticle(id));
   const [itemLoading, setItemLoading] = useState(() => !getCachedArticle(id));
   const [itemNotFound, setItemNotFound] = useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
   const [lines, setLines] = useState<string[]>(() => load(id)?.lines ?? []);
   const [hook, setHook] = useState<string | null>(() => load(id)?.hook ?? null);
   const [loading, setLoading] = useState(false);
@@ -256,6 +258,19 @@ export function ArticlePage() {
         <button onClick={goBack} className="text-xs flex gap-1">
           <ArrowLeft className="h-3 w-3" /> Back
         </button>
+
+        <div className="-mx-4 aspect-[16/9] w-auto overflow-hidden bg-surface-2 sm:mx-0 sm:rounded-xl">
+          {item.image && !imgFailed ? (
+            <img
+              src={item.image}
+              alt={item.title}
+              className="h-full w-full object-cover"
+              onError={() => setImgFailed(true)}
+            />
+          ) : (
+            <ArticleCover title={item.title} category={item.category} className="h-full w-full" />
+          )}
+        </div>
 
         <h1 className="text-xl font-semibold">{item.title}</h1>
 
