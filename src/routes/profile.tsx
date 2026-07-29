@@ -4,6 +4,7 @@ import { Zap, Trophy, Wallet, Activity, Calendar, Trash2, LogOut, LogIn, Message
 import { type BriefingAnimation } from "@/components/AISummaryCard";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
+import { Footer } from "@/components/Footer";
 import { useAppState } from "@/hooks/use-app-state";
 import { useUser } from "@/hooks/use-user";
 import { getCycle, pointsToUSD, POINTS } from "@/lib/rewards";
@@ -393,6 +394,7 @@ function ProfilePage() {
           )}
         </section>
 
+        <Footer />
       </main>
       <BottomNav />
     </div>
