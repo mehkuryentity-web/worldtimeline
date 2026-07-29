@@ -6,7 +6,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { COUNTRIES, findCountry, type Country } from "@/lib/countries";
-import { useCountryCoverage, LOW_COVERAGE_THRESHOLD } from "@/hooks/useCountryCoverage";
+import { useCountryCoverage, LOW_COVERAGE_THRESHOLD } from "@/hooks/use-country-coverage";
 
 interface Props {
   value: string;
