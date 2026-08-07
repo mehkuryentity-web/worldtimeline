@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
-import { AISummaryCard, type PinnedArticle } from "@/components/AISummaryCard";
+import { AISummaryCard } from "@/components/AISummaryCard";
 import { CategoryTabs } from "@/components/CategoryTabs";
 import { CountrySelector } from "@/components/CountrySelector";
 import { NewsCard } from "@/components/NewsCard";
@@ -37,7 +37,6 @@ interface ApiNewsItem {
   source: string;
   region: string;
   publishedAt: string;
-  ingestedAt?: string;
   summary: string;
   url: string;
   image?: string;
@@ -51,25 +50,6 @@ type Mode =
   | "1h"
   | "24h"
   | "custom";
-
-// Headline objects sent to the briefing now carry full article metadata, not
-// just title/summary -- get-briefing stores the top slice of these verbatim
-// as the "pinned" article set for this briefing (see ai_briefings.articles),
-// which is what powers the "Covered in this briefing" feed strip below.
-type BriefingHeadline =
-  | string
-  | {
-      title: string;
-      summary?: string;
-      url?: string;
-      source?: string;
-      image?: string;
-      id?: string;
-      category?: string;
-      region?: string;
-      publishedAt?: string;
-      ingestedAt?: string;
-    };
 
 function Home() {
   const { state, award, update } = useAppState();
@@ -162,7 +142,7 @@ function Home() {
     award("open_app");
   }, []);
 
-  const { data, isLoading, isFetching, refetch } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["news", country, category],
     // "Videos" isn't a real news category -- that tab is video-only, so
     // there's no point spending an API call that would just come back empty.
@@ -174,21 +154,6 @@ function Home() {
     retry: false,
     staleTime: 5 * 60 * 1000,
   });
-
-  // Tight windows (5m/10m/30m) now filter by ingestion time, so a batch
-  // sitting in cache for up to staleTime (5min) can itself be stale enough
-  // to hide items that would otherwise pass the filter. Force a fresh pull
-  // the moment one of those windows is selected rather than waiting out the
-  // normal cache -- 1h/24h/all/custom keep the regular 5-min cache since
-  // they're far less sensitive to a few minutes of staleness.
-  const TIGHT_MODES: Mode[] = ["5m", "10m", "30m"];
-  const prevModeRef = useRef<Mode>(mode);
-  useEffect(() => {
-    if (TIGHT_MODES.includes(mode) && prevModeRef.current !== mode) {
-      refetch();
-    }
-    prevModeRef.current = mode;
-  }, [mode, refetch]);
 
   // The telemetry preloader is reserved for the very first feed load only.
   // Category/country switches re-trigger isLoading (new query key), but
@@ -205,7 +170,6 @@ function Home() {
     source: n.source,
     region: n.region,
     publishedAt: n.publishedAt,
-    ingestedAt: n.ingestedAt,
     summary: n.summary,
     url: n.url,
     image: n.image,
@@ -260,24 +224,42 @@ function Home() {
   let items: NewsItem[] = [];
 
   if (mode === "all") {
-    items = [...allItems].sort(
-      (a, b) =>
-        new Date(b.publishedAt).getTime() -
-        new Date(a.publishedAt).getTime()
-    );
+    if (category === "Top") {
+      // apiItems already arrive in the deliberate currents/newsnow order
+      // from get-news (30-guaranteed + 80/20 interleave, images
+      // guaranteed for the first block) -- resorting everything by
+      // publishedAt would merge the two sources back together by recency
+      // and erase that order (the exact bug we just fixed on the
+      // backend). Community posts still need to appear mixed in by
+      // recency though, so they're merged into the api order by
+      // timestamp instead of the whole list being sorted.
+      const sortedUserItems = [...userItems].sort(
+        (a, b) =>
+          new Date(b.publishedAt).getTime() -
+          new Date(a.publishedAt).getTime()
+      );
+
+      items = [...apiItems];
+      sortedUserItems.forEach((post) => {
+        const postTime = new Date(post.publishedAt).getTime();
+        // Insert just before the first item older than this post -- drops
+        // it in at roughly the right spot in time without reordering apiItems.
+        const insertAt = items.findIndex(
+          (item) => new Date(item.publishedAt).getTime() < postTime
+        );
+        if (insertAt === -1) items.push(post);
+        else items.splice(insertAt, 0, post);
+      });
+    } else {
+      items = [...allItems].sort(
+        (a, b) =>
+          new Date(b.publishedAt).getTime() -
+          new Date(a.publishedAt).getTime()
+      );
+    }
   } else {
-    // Freshness here is measured by ingestion time (when we last confirmed
-    // the item in the archive), not by the source's claimed publish time.
-    // Sync cadence tops out at 5min for the fastest provider and runs up to
-    // 2-3hr for others, so published_at is routinely 10-90+ minutes old by
-    // the time a row lands in the archive -- filtering the 5/10/30-min
-    // windows against it was structurally close to always-empty regardless
-    // of real freshness. ingestedAt reflects "new to WorldTimeline", which
-    // is what these tight windows are meant to mean. Community posts (no
-    // ingestedAt from the API) fall back to publishedAt, unaffected.
     const filtered = allItems.filter((item) => {
-      const freshnessBasis = item.ingestedAt ?? item.publishedAt;
-      const age = now - new Date(freshnessBasis).getTime();
+      const age = now - new Date(item.publishedAt).getTime();
       return age <= windowMs;
     });
 
@@ -300,7 +282,7 @@ function Home() {
   // ---- VIDEO FEED (mixed into the main feed, not a separate tab) ----
   // Fetched independently of articles so a Supabase hiccup here never
   // blocks the article feed from rendering.
-  const { data: videosData, isFetching: isFetchingVideos } = useQuery({
+  const { data: videosData } = useQuery({
     queryKey: ["videos", country],
     queryFn: () => getVideos(country),
     staleTime: 5 * 60 * 1000,
@@ -318,32 +300,6 @@ function Home() {
           const age = now - new Date(v.publishedAt).getTime();
           return age <= windowMs;
         });
-
-  // ---- PINNED "COVERED IN THIS BRIEFING" ARTICLES ----
-  // Populated by AISummaryCard once its briefing (cached or freshly
-  // generated) resolves -- these are the exact articles that briefing was
-  // built from, per get-briefing's stored `articles` snapshot. Empty for
-  // the Videos tab by design (videos don't map onto NewsCard's shape).
-  const [pinnedArticles, setPinnedArticles] = useState<PinnedArticle[]>([]);
-
-  const pinnedIds = new Set(
-    pinnedArticles.map((a) => a.id).filter((id): id is string => Boolean(id))
-  );
-
-  const pinnedNewsItems: NewsItem[] = pinnedArticles
-    .filter((a) => a.id && a.url) // only render entries we have enough data to build a real card from
-    .map((a) => ({
-      id: a.id,
-      category: (a.category || category) as Category,
-      title: a.title,
-      source: a.source,
-      region: a.region,
-      publishedAt: a.publishedAt,
-      ingestedAt: a.ingestedAt || undefined,
-      summary: a.summary,
-      url: a.url,
-      image: a.image || undefined,
-    }));
 
   type FeedEntry = { publishedAt: string; node: JSX.Element };
 
@@ -376,19 +332,12 @@ function Home() {
     // what the current article count actually supports are held back
     // rather than dumped back-to-back at the end -- that pile-up was the
     // bug. They'll surface naturally as more articles load via Load More.
-    //
-    // Articles already shown up top in the "Covered in this briefing" strip
-    // are excluded here so they don't repeat further down the feed.
     let videoIdx = 0;
 
-    const feedItems = pinnedIds.size
-      ? items.filter((item) => !pinnedIds.has(item.id))
-      : items;
-
-    feedItems.forEach((item, i) => {
+    items.forEach((item, i) => {
       feedEntries.push({
         publishedAt: item.publishedAt,
-        node: <NewsCard key={`a-${item.id}`} item={item} useIngestedTime={mode !== "all"} />,
+        node: <NewsCard key={`a-${item.id}`} item={item} />,
       });
 
       if ((i + 1) % ARTICLES_PER_VIDEO === 0 && videoIdx < sortedVideos.length) {
@@ -513,78 +462,13 @@ function Home() {
   // design), so feed the briefing top 5 videos' title/channel/view-count
   // instead -- same pipeline, different "headlines" content. Everywhere
   // else, real category-filtered article titles as before.
-  // Videos keeps the pre-formatted string shape (get-briefing accepts both
-  // plain strings and {title, summary, ...} objects). Article headlines now
-  // also carry each item's full metadata (url, source, image, id, category,
-  // region, publishedAt, ingestedAt) alongside title/summary -- get-briefing
-  // stores this top slice verbatim as the briefing's pinned article set,
-  // which is what renders as "Covered in this briefing" below, and having
-  // the real summary text also grounds the briefing itself against stale-
-  // knowledge errors (e.g. calling a current officeholder "former") and
-  // fabricated details, since the model has actual current-events text to
-  // defer to instead of guessing. Slice bumped to 8 to match get-briefing's
-  // TOP_N, so the full pinnable set actually reaches the backend.
-  const briefingHeadlines: BriefingHeadline[] =
+  const briefingHeadlines: string[] =
     category === "Videos"
       ? sortedVideos.slice(0, 5).map((v) => {
           const views = formatViewCount(v.viewCount);
           return `${v.title} — ${v.channelTitle}${views ? ` (${views})` : ""}`;
         })
-      : items.slice(0, 8).map((i) => ({
-          title: i.title,
-          summary: i.summary,
-          url: i.url,
-          source: i.source,
-          image: i.image,
-          id: i.id,
-          category: i.category,
-          region: i.region,
-          publishedAt: i.publishedAt,
-          ingestedAt: i.ingestedAt,
-        }));
-
-  // ---- BRIEFING SETTLE GATE ----
-  // React Query paints cached/stale data immediately on mount, then often
-  // resolves a background refetch with genuinely different top headlines a
-  // moment later. Feeding every intermediate value straight to the briefing
-  // card meant two real, back-to-back generations for what the user
-  // experiences as one page load: the stale set finishes playing, then the
-  // freshly-resolved set restarts it.
-  //
-  // This gates on the query's own `isFetching` flag rather than a timer:
-  // when data is already fresh (the common case -- repeat visits inside the
-  // 5-minute staleTime), isFetching is false immediately and the briefing
-  // starts with zero added delay. Only while a real background refetch is
-  // actually in flight does this hold off, and only for as long as that
-  // refetch genuinely takes -- not an arbitrary constant. It has no bearing
-  // on the server-side ai_briefings cache, which is shared across all users
-  // regardless of what any single client is doing here.
-  const briefingSourceSettled = category === "Videos" ? !isFetchingVideos : !isFetching;
-  const briefingKey = briefingHeadlines
-    .map((h) => (typeof h === "string" ? h : `${h.title}::${h.summary ?? ""}`))
-    .join("|");
-  const [stableBriefingHeadlines, setStableBriefingHeadlines] = useState<BriefingHeadline[]>(
-    briefingHeadlines
-  );
-  // country/category/mode must move in lockstep with the headlines they were
-  // generated from -- otherwise a fresh `country` (updated synchronously on
-  // tap) can pair with the previous, not-yet-settled country's headlines,
-  // sending a mismatched pair to the briefing (e.g. "Canada" label with
-  // Nigeria's headlines still in flight). Gating all four behind the same
-  // settle condition keeps the card showing the last known-good briefing
-  // until the new country's headlines have actually arrived.
-  const [stableBriefingCountry, setStableBriefingCountry] = useState(country);
-  const [stableBriefingCategory, setStableBriefingCategory] = useState(category);
-  const [stableBriefingMode, setStableBriefingMode] = useState(mode);
-
-  useEffect(() => {
-    if (!briefingSourceSettled) return;
-    setStableBriefingHeadlines(briefingHeadlines);
-    setStableBriefingCountry(country);
-    setStableBriefingCategory(category);
-    setStableBriefingMode(mode);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [briefingSourceSettled, briefingKey, country, category, mode]);
+      : items.slice(0, 6).map((i) => i.title);
 
   const isCustomValid =
     customRange.hours.trim() !== "" ||
@@ -600,11 +484,10 @@ function Home() {
 
       <main className="mx-auto max-w-md space-y-4 px-4 pt-4 pb-6">
         <AISummaryCard
-          headlines={stableBriefingHeadlines}
-          country={stableBriefingCountry}
-          category={stableBriefingCategory}
-          mode={stableBriefingMode}
-          onArticlesLoaded={setPinnedArticles}
+          headlines={briefingHeadlines}
+          country={country}
+          category={category}
+          mode={mode}
         />
 
         <div className="flex items-center justify-between gap-2">
@@ -665,17 +548,6 @@ function Home() {
         <h2 className="text-[10px] uppercase text-muted-foreground">
           {countryMeta.flag} {countryMeta.name} · {category}
         </h2>
-
-        {pinnedNewsItems.length > 0 && category !== "Videos" && (
-          <div className="space-y-3">
-            <h3 className="text-[10px] uppercase tracking-widest text-muted-foreground/70">
-              Covered in this briefing
-            </h3>
-            {pinnedNewsItems.map((item) => (
-              <NewsCard key={`pinned-${item.id}`} item={item} />
-            ))}
-          </div>
-        )}
 
         {isLoading ? (
           hasLoadedOnce ? (
