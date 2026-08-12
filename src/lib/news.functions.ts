@@ -89,6 +89,8 @@ export const generateBriefing = async (
   cached?: boolean;
   stale?: boolean;
   error?: string;
+  generated_at?: string | null;
+  articles?: unknown[];
 }> => {
   try {
     const SUPABASE_KEY = getSupabaseKey();
@@ -120,6 +122,8 @@ export const generateBriefing = async (
       conclusion: data?.conclusion || "",
       cached: !!data?.cached,
       stale: !!data?.stale,
+      generated_at: data?.generated_at ?? null,
+      articles: Array.isArray(data?.articles) ? data.articles : [],
     };
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") {
