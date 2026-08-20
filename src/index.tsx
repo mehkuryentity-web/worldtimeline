@@ -11,6 +11,7 @@ import { NewsCard } from "@/components/NewsCard";
 import { VideoCard } from "@/components/VideoCard";
 import { Ticker } from "@/components/Ticker";
 import { TelemetryPreloader } from "@/components/TelemetryPreloader";
+import { NewsFeedSkeleton } from "@/components/NewsCardSkeleton";
 
 import {
   type Category,
@@ -21,7 +22,7 @@ import {
 
 import { findCountry } from "@/lib/countries";
 import { useAppState } from "@/hooks/use-app-state";
-import { Loader2, Timer } from "lucide-react";
+import { Timer } from "lucide-react";
 
 import { getNews } from "@/lib/news";
 import { getVideos, formatViewCount, type VideoListing } from "@/lib/videos";
@@ -155,14 +156,6 @@ function Home() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // The telemetry preloader is reserved for the very first feed load only.
-  // Category/country switches re-trigger isLoading (new query key), but
-  // those should stay on the plain inline spinner, not the full animation.
-  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
-  useEffect(() => {
-    if (!isLoading && data) setHasLoadedOnce(true);
-  }, [isLoading, data]);
-
   const apiItems: NewsItem[] = (data?.items ?? []).map((n: ApiNewsItem) => ({
     id: n.id,
     category: n.category as Category,
@@ -224,15 +217,12 @@ function Home() {
   let items: NewsItem[] = [];
 
   if (mode === "all") {
-    if (category === "Top" && country === "GLOBAL") {
+    if (category === "Top") {
       // apiItems already arrive in the deliberate currents/newsnow order
-      // from get-news -- but ONLY for Top + Global (30-guaranteed + 80/20
-      // interleave, images guaranteed for the first block). Any specific
-      // country on the Top tab gets a plain recency-sorted mix from the
-      // backend with no ratio logic, so it falls into the else branch
-      // below like every other category. Resorting the Global Top order
-      // by publishedAt would merge the two sources back together by
-      // recency and erase it (the exact bug we just fixed on the
+      // from get-news (30-guaranteed + 80/20 interleave, images
+      // guaranteed for the first block) -- resorting everything by
+      // publishedAt would merge the two sources back together by recency
+      // and erase that order (the exact bug we just fixed on the
       // backend). Community posts still need to appear mixed in by
       // recency though, so they're merged into the api order by
       // timestamp instead of the whole list being sorted.
@@ -553,14 +543,7 @@ function Home() {
         </h2>
 
         {isLoading ? (
-          hasLoadedOnce ? (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Loading feed...
-            </div>
-          ) : (
-            <TelemetryPreloader />
-          )
+          category === "Top" ? <TelemetryPreloader /> : <NewsFeedSkeleton />
         ) : (
           <div className="space-y-3" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
             {visibleEntries.map((entry) => entry.node)}
