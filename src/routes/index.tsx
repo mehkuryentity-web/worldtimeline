@@ -11,6 +11,7 @@ import { NewsCard } from "@/components/NewsCard";
 import { VideoCard } from "@/components/VideoCard";
 import { Ticker } from "@/components/Ticker";
 import { TelemetryPreloader } from "@/components/TelemetryPreloader";
+import { NewsFeedSkeleton } from "@/components/NewsCardSkeleton";
 
 import {
   type Category,
@@ -21,7 +22,7 @@ import {
 
 import { findCountry } from "@/lib/countries";
 import { useAppState } from "@/hooks/use-app-state";
-import { Loader2, Timer } from "lucide-react";
+import { Timer } from "lucide-react";
 
 import { getNews } from "@/lib/news";
 import { getVideos, formatViewCount, type VideoListing } from "@/lib/videos";
@@ -154,14 +155,6 @@ function Home() {
     retry: false,
     staleTime: 5 * 60 * 1000,
   });
-
-  // The telemetry preloader is reserved for the very first feed load only.
-  // Category/country switches re-trigger isLoading (new query key), but
-  // those should stay on the plain inline spinner, not the full animation.
-  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
-  useEffect(() => {
-    if (!isLoading && data) setHasLoadedOnce(true);
-  }, [isLoading, data]);
 
   const apiItems: NewsItem[] = (data?.items ?? []).map((n: ApiNewsItem) => ({
     id: n.id,
@@ -550,14 +543,7 @@ function Home() {
         </h2>
 
         {isLoading ? (
-          hasLoadedOnce ? (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Loading feed...
-            </div>
-          ) : (
-            <TelemetryPreloader />
-          )
+          category === "Top" ? <TelemetryPreloader /> : <NewsFeedSkeleton />
         ) : (
           <div className="space-y-3" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
             {visibleEntries.map((entry) => entry.node)}
