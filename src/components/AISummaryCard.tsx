@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { generateBriefing } from "@/lib/news.functions";
-import { supabase } from "@/integrations/supabase/client";
 import { useAppState } from "@/hooks/use-app-state";
+import { useUser } from "@/hooks/use-user";
 
 const CACHE_KEY_PREFIX = "wt:ai-briefing:v2:";
 const GUEST_ID_KEY = "wt:guest-id:v1";
@@ -22,12 +22,27 @@ const MATRIX_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&!?";
 
 export type BriefingAnimation = "blur" | "typewriter" | "fade" | "slide" | "matrix" | "none";
 
-// savedAt now holds the BACKEND's generated_at (ms since epoch) whenever the
-// server gives us one, not just "whenever this device happened to fetch" --
-// this is what lets the local cache's TTL agree with the server's, instead
-// of a stale echo (see below) getting stamped as "fresh as of right now".
-interface CachedBriefing { summary: string; conclusion: string; savedAt: number; }
-interface Props { headlines: string[]; country: string; category: string; mode: string; }
+export interface PinnedArticle {
+  title: string; summary: string; url: string; source: string; image: string;
+  id: string; category: string; region: string; publishedAt: string; ingestedAt: string;
+}
+
+interface CachedBriefing {
+  summary: string; conclusion: string; articles: PinnedArticle[];
+  // savedAt holds the BACKEND's generated_at (ms since epoch), not the local
+  // fetch time -- this is what makes the countdown identical for every user
+  // looking at the same country/category/mode, instead of each device
+  // running its own independent hour from whenever it happened to load.
+  savedAt: number;
+}
+interface Props {
+  headlines: (string | { title: string; summary?: string })[];
+  country: string; category: string; mode: string;
+  // Bubbles the pinned article set up to the parent feed so it can render
+  // the "Covered in this briefing" strip and exclude those articles from
+  // resurfacing further down the feed.
+  onArticlesLoaded?: (articles: PinnedArticle[]) => void;
+}
 
 /* ---- Cache helpers ---- */
 function cacheKeyFor(c: string, cat: string, m: string) { return `${CACHE_KEY_PREFIX}${c}|${cat}|${m}`; }
@@ -39,8 +54,10 @@ function getCache(key: string): CachedBriefing | null {
     return Date.now() - p.savedAt > ONE_HOUR_MS ? null : p;
   } catch { return null; }
 }
-function setCache(key: string, summary: string, conclusion: string, savedAtMs: number) {
-  try { localStorage.setItem(key, JSON.stringify({ summary, conclusion, savedAt: savedAtMs })); } catch {}
+function setCache(key: string, summary: string, conclusion: string, articles: PinnedArticle[], generatedAtMs: number) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ summary, conclusion, articles, savedAt: generatedAtMs }));
+  } catch {}
 }
 
 /* ---- Greeting / guest ---- */
@@ -57,17 +74,18 @@ function getOrCreateGuestId() {
     return f;
   } catch { return "Guest_0000"; }
 }
-async function resolveDisplayName(): Promise<{ name: string; isGuest: boolean }> {
-  try {
-    const { data, error } = await supabase.auth.getUser();
-    if (!error && data?.user) {
-      const u = data.user;
-      const name = (u.user_metadata as any)?.full_name || (u.user_metadata as any)?.name ||
-        (u.user_metadata as any)?.username || (u.email ? u.email.split("@")[0] : null) || "there";
-      return { name, isGuest: false };
-    }
-  } catch {}
-  return { name: getOrCreateGuestId(), isGuest: true };
+
+/* ---- Footer line ---- */
+const FOOTER_LINE = "Based on today's top stories...";
+
+/* ---- Refresh countdown ---- */
+function formatRefreshLabel(savedAt: number | null): string | null {
+  if (savedAt == null) return null;
+  const remainingMs = ONE_HOUR_MS - (Date.now() - savedAt);
+  if (remainingMs <= 0) return "Refreshing soon";
+  const minutes = Math.max(1, Math.round(remainingMs / 60000));
+  if (minutes >= 60) return "Refreshes in 1 hour";
+  return `Refreshes in ${minutes} min`;
 }
 
 /* ---- Session dedup ---- */
@@ -79,23 +97,29 @@ function splitWords(text: string): string[] { return text.match(/\S+\s*/g) || []
    ============================================================ */
 function useTypewriterAnim(text: string, go: boolean) {
   const [displayed, setDisplayed] = useState("");
+  const [done, setDone] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
-    if (!go) { setDisplayed(text); return; }
+    if (!go) { setDisplayed(text); setDone(true); return; }
     setDisplayed("");
+    setDone(false);
     let i = 0;
     function tick() {
       i++;
       setDisplayed(text.slice(0, i));
-      if (i < text.length) timerRef.current = setTimeout(tick, TYPEWRITER_MS);
+      if (i < text.length) {
+        timerRef.current = setTimeout(tick, TYPEWRITER_MS);
+      } else {
+        setDone(true);
+      }
     }
     timerRef.current = setTimeout(tick, TYPEWRITER_MS);
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [text, go]);
 
-  return displayed;
+  return { text: displayed, done };
 }
 
 /* ============================================================
@@ -156,110 +180,94 @@ function useMatrixAnim(text: string, go: boolean) {
 
 /* ============================================================
    ANIMATED TEXT
+   Renders summary + conclusion merged into a single paragraph.
    Key insight: this component gets a `animKey` prop so React
    fully unmounts+remounts it when new text arrives, guaranteeing
    CSS animations restart from the beginning rather than being
    skipped because the DOM nodes already existed.
    ============================================================ */
 function AnimatedText({
-  summary, conclusion, animStyle, shouldAnimate, animKey,
+  text, animStyle, shouldAnimate, onComplete,
 }: {
-  summary: string; conclusion: string;
+  text: string;
   animStyle: BriefingAnimation; shouldAnimate: boolean;
-  animKey: string;
+  onComplete: () => void;
 }) {
   const go = shouldAnimate && animStyle !== "none";
-  const fullText = summary + (conclusion ? "\n\n" + conclusion : "");
+  const calledCompleteRef = useRef(false);
 
-  const twFull = useTypewriterAnim(fullText, go && animStyle === "typewriter");
-  const matResult = useMatrixAnim(fullText, go && animStyle === "matrix");
-  const matFull = matResult.text;
-  const matDone = matResult.done;
+  const tw = useTypewriterAnim(text, go && animStyle === "typewriter");
+  const mat = useMatrixAnim(text, go && animStyle === "matrix");
 
-  const summaryWords = splitWords(summary);
-  const conclusionWords = splitWords(conclusion);
-  const summaryWordCount = summaryWords.length;
+  const words = splitWords(text);
 
-  function wordSpans(
-    words: string[], offset: number, keyPrefix: string,
-    cls: string, style: (i: number) => React.CSSProperties
-  ) {
+  // Fire onComplete exactly once per mount, whenever this style's "done" condition is met.
+  useEffect(() => {
+    calledCompleteRef.current = false;
+  }, [text, animStyle, shouldAnimate]);
+
+  function fireCompleteOnce() {
+    if (!calledCompleteRef.current) {
+      calledCompleteRef.current = true;
+      onComplete();
+    }
+  }
+
+  useEffect(() => {
+    if (animStyle === "typewriter" && tw.done) fireCompleteOnce();
+  }, [animStyle, tw.done]);
+
+  useEffect(() => {
+    if (animStyle === "matrix" && mat.done) fireCompleteOnce();
+  }, [animStyle, mat.done]);
+
+  useEffect(() => {
+    if (animStyle === "none" || !shouldAnimate) {
+      fireCompleteOnce();
+    }
+  }, [animStyle, shouldAnimate]);
+
+  // blur / fade / slide: complete after the last word's stagger + its own transition duration
+  useEffect(() => {
+    if (go && (animStyle === "blur" || animStyle === "fade" || animStyle === "slide")) {
+      const totalMs = Math.max(0, words.length - 1) * STAGGER_MS + DURATION_MS;
+      const t = setTimeout(fireCompleteOnce, totalMs);
+      return () => clearTimeout(t);
+    }
+  }, [go, animStyle, words.length]);
+
+  function wordSpans(cls: string) {
     return words.map((w, i) => (
-      <span key={`${keyPrefix}-${i}`} className={go ? cls : undefined}
-        style={go ? style(offset + i) : undefined}>{w}</span>
+      <span key={i} className={go ? cls : undefined}
+        style={go ? { animationDelay: `${i * STAGGER_MS}ms` } : undefined}>{w}</span>
     ));
   }
 
   /* none */
   if (animStyle === "none" || !shouldAnimate) {
-    return (
-      <div className="mt-2 space-y-3">
-        <p className="text-sm leading-relaxed text-foreground">{summary}</p>
-        {conclusion && <p className="text-sm leading-relaxed text-foreground">{conclusion}</p>}
-      </div>
-    );
+    return <p className="text-sm leading-relaxed text-foreground">{text}</p>;
   }
 
   /* typewriter */
   if (animStyle === "typewriter") {
-    const [twSummary, twConclusion] = twFull.split("\n\n");
     return (
-      <div className="mt-2 space-y-3">
-        <p className="text-sm leading-relaxed text-foreground font-mono">
-          {twSummary ?? ""}
-          {(twSummary?.length ?? 0) < summary.length && (
-            <span className="animate-pulse text-primary">|</span>
-          )}
-        </p>
-        {conclusion && (
-          <p className="text-sm leading-relaxed text-foreground font-mono">
-            {twConclusion ?? ""}
-            {twConclusion !== undefined && twConclusion.length < conclusion.length && (
-              <span className="animate-pulse text-primary">|</span>
-            )}
-          </p>
-        )}
-      </div>
+      <p className="text-sm leading-relaxed text-foreground">
+        {tw.text}
+        {!tw.done && <span className="animate-pulse text-primary">|</span>}
+      </p>
     );
   }
 
   /* matrix */
   if (animStyle === "matrix") {
-    const [matSummary, matConclusion] = matFull.split("\n\n");
-    const matrixCls = matDone
-      ? "text-sm leading-relaxed text-foreground"
-      : "text-sm leading-relaxed font-mono tracking-wide";
-    const matrixStyle = matDone ? undefined : { color: "#ffffff" };
-    return (
-      <div className="mt-2 space-y-3">
-        <p className={matrixCls} style={matrixStyle}>
-          {matSummary ?? ""}
-        </p>
-        {conclusion && (
-          <p className={matrixCls} style={matrixStyle}>
-            {matConclusion ?? ""}
-          </p>
-        )}
-      </div>
-    );
+    return <p className="text-sm leading-relaxed text-foreground">{mat.text}</p>;
   }
 
   /* blur */
   if (animStyle === "blur") {
     return (
       <>
-        <div className="mt-2 space-y-3">
-          <p className="text-sm leading-relaxed text-foreground">
-            {wordSpans(summaryWords, 0, "s", "wt-blur-word",
-              (i) => ({ animationDelay: `${i * STAGGER_MS}ms` }))}
-          </p>
-          {conclusionWords.length > 0 && (
-            <p className="text-sm leading-relaxed text-foreground">
-              {wordSpans(conclusionWords, summaryWordCount, "c", "wt-blur-word",
-                (i) => ({ animationDelay: `${i * STAGGER_MS}ms` }))}
-            </p>
-          )}
-        </div>
+        <p className="text-sm leading-relaxed text-foreground">{wordSpans("wt-blur-word")}</p>
         <style>{`
           @keyframes wt-blur-in {
             from { opacity: 0; filter: blur(8px); transform: translateY(3px); }
@@ -278,18 +286,7 @@ function AnimatedText({
   if (animStyle === "fade") {
     return (
       <>
-        <div className="mt-2 space-y-3">
-          <p className="text-sm leading-relaxed text-foreground">
-            {wordSpans(summaryWords, 0, "s", "wt-fade-word",
-              (i) => ({ animationDelay: `${i * STAGGER_MS}ms` }))}
-          </p>
-          {conclusionWords.length > 0 && (
-            <p className="text-sm leading-relaxed text-foreground">
-              {wordSpans(conclusionWords, summaryWordCount, "c", "wt-fade-word",
-                (i) => ({ animationDelay: `${i * STAGGER_MS}ms` }))}
-            </p>
-          )}
-        </div>
+        <p className="text-sm leading-relaxed text-foreground">{wordSpans("wt-fade-word")}</p>
         <style>{`
           @keyframes wt-fade-in {
             from { opacity: 0; }
@@ -308,18 +305,9 @@ function AnimatedText({
   if (animStyle === "slide") {
     return (
       <>
-        <div className="mt-2 space-y-3">
-          <p className="text-sm leading-relaxed text-foreground" style={{ overflow: "hidden" }}>
-            {wordSpans(summaryWords, 0, "s", "wt-slide-word",
-              (i) => ({ animationDelay: `${i * STAGGER_MS}ms` }))}
-          </p>
-          {conclusionWords.length > 0 && (
-            <p className="text-sm leading-relaxed text-foreground" style={{ overflow: "hidden" }}>
-              {wordSpans(conclusionWords, summaryWordCount, "c", "wt-slide-word",
-                (i) => ({ animationDelay: `${i * STAGGER_MS}ms` }))}
-            </p>
-          )}
-        </div>
+        <p className="text-sm leading-relaxed text-foreground" style={{ overflow: "hidden" }}>
+          {wordSpans("wt-slide-word")}
+        </p>
         <style>{`
           @keyframes wt-slide-up {
             from { opacity: 0; transform: translateY(12px); }
@@ -340,16 +328,23 @@ function AnimatedText({
 /* ============================================================
    MAIN COMPONENT
    ============================================================ */
-export function AISummaryCard({ headlines, country, category, mode }: Props) {
+export function AISummaryCard({ headlines, country, category, mode, onArticlesLoaded }: Props) {
   const { state } = useAppState();
-  const animStyle: BriefingAnimation = (state.briefingAnimation as BriefingAnimation) ?? "matrix";
+  const animStyle: BriefingAnimation = (state.briefingAnimation as BriefingAnimation) ?? "fade";
 
-  const [greetingName, setGreetingName] = useState("there");
-  const [isGuest, setIsGuest] = useState(true);
+  const { user } = useUser();
+  const greetingName = user
+    ? ((user.user_metadata as any)?.full_name || (user.user_metadata as any)?.name ||
+        (user.user_metadata as any)?.username || (user.email ? user.email.split("@")[0] : null) || "there")
+    : getOrCreateGuestId();
+  const isGuest = !user;
   const [summary, setSummary] = useState("");
   const [conclusion, setConclusion] = useState("");
   const [status, setStatus] = useState<"loading" | "ready" | "empty">("loading");
   const [shouldAnimate, setShouldAnimate] = useState(true);
+  const [animationComplete, setAnimationComplete] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [refreshLabel, setRefreshLabel] = useState<string | null>(null);
   // Changes every time genuinely new text arrives — forces AnimatedText to remount
   // so CSS animations always restart cleanly from frame 0.
   const [animKey, setAnimKey] = useState(0);
@@ -361,18 +356,24 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
     return true;
   }
 
+  // Briefing load — cache first, fetch only when cache is missing/expired.
+  // NOTE: this effect also self-schedules its own re-run once the cache TTL
+  // elapses, so the card actually refreshes while it sits mounted on screen —
+  // it no longer depends on the user changing tabs/props to notice expiry.
   useEffect(() => {
     let alive = true;
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    setAnimationComplete(false);
 
-    // Self-schedules its own re-run once the cache TTL elapses, so the card
-    // actually refreshes while it sits mounted -- it no longer depends on
-    // the user navigating away/back or a prop changing to notice expiry.
     function scheduleAutoRefresh(fromSavedAt: number) {
       if (refreshTimer) clearTimeout(refreshTimer);
       const msUntilExpiry = ONE_HOUR_MS - (Date.now() - fromSavedAt);
+      // Fire slightly after the TTL boundary (1s buffer) so getCache() has
+      // already invalidated the entry by the time we re-check it.
       const delay = Math.max(1000, msUntilExpiry + 1000);
-      refreshTimer = setTimeout(() => { if (alive) load(); }, delay);
+      refreshTimer = setTimeout(() => {
+        if (alive) load();
+      }, delay);
     }
 
     async function load() {
@@ -383,38 +384,31 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
         setShouldAnimate(decideAnimate(cached.summary, cached.conclusion));
         setSummary(cached.summary);
         setConclusion(cached.conclusion);
+        setSavedAt(cached.savedAt);
         setAnimKey((k) => k + 1);
         setStatus("ready");
+        onArticlesLoaded?.(cached.articles || []);
         scheduleAutoRefresh(cached.savedAt);
         return; // valid cache hit — skip the network call entirely
       }
 
-      // No valid local cache. If we don't have any real headlines yet
-      // (e.g. this is the very first mount, before the news query for this
-      // country/category has resolved), do NOT call the backend with an
-      // empty array. The server's empty-headlines path just echoes back
-      // whatever brief it last generated -- possibly days/weeks old -- with
-      // a stale:true flag. Caching that echo as if it were fresh (which is
-      // what this component used to do) resets the local TTL to "now" while
-      // showing old content, which blocks any real refresh for the next
-      // hour. This is what was causing individual countries/categories to
-      // get stuck on an old brief indefinitely: every visit re-triggered
-      // the same empty-headlines race before news items had loaded.
+      // No valid local cache. If we don't have real headlines yet (e.g. this
+      // is the very first mount, before the news query for this country/
+      // category has resolved), do NOT call the backend with an empty array.
+      // The server's empty-headlines path just echoes back whatever brief it
+      // last generated -- possibly days/weeks old -- tagged stale:true. That
+      // used to get cached below as if it were a normal fresh result, which
+      // reset the local TTL to "now" while showing old content -- blocking
+      // any real refresh for the next hour on every single visit. That's
+      // what was leaving some countries/categories stuck on an old brief
+      // indefinitely. Just wait for real headlines instead.
       if (!headlines.length) {
-        if (alive) setStatus("loading");
-        // Retry shortly -- the effect will also re-run on its own once
-        // `headlines` actually changes, but this covers cases where it
-        // legitimately stays empty for a while (e.g. sparse country feed).
+        setStatus("loading");
         refreshTimer = setTimeout(() => { if (alive) load(); }, 15000);
         return;
       }
 
-      if (alive) setStatus("loading");
-
-      const { name, isGuest: guestFlag } = await resolveDisplayName();
-      if (!alive) return;
-      setGreetingName(name);
-      setIsGuest(guestFlag);
+      setStatus("loading");
 
       const res = await generateBriefing({ country, category, mode, headlines });
       if (!alive) return;
@@ -422,37 +416,45 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
       const hasText = typeof res?.summary === "string" && res.summary.trim().length > 0;
 
       if (res?.stale) {
-        // Stale echo from the server (it had nothing fresh to give us).
-        // Show it so the card isn't blank, but do NOT write it to the
-        // local cache as current, and retry again soon rather than
-        // scheduling a full hour out.
+        // Server had nothing fresh to give us. Show it so the card isn't
+        // blank, but do NOT write it to cache or treat it as a completed
+        // refresh -- retry again soon instead of scheduling a full hour out.
         if (hasText) {
+          const generatedAtMs = res.generated_at ? new Date(res.generated_at).getTime() : null;
+          const articles: PinnedArticle[] = Array.isArray(res.articles) ? res.articles : [];
           setShouldAnimate(decideAnimate(res.summary, res.conclusion || ""));
           setSummary(res.summary);
           setConclusion(res.conclusion || "");
+          setSavedAt(generatedAtMs);
           setAnimKey((k) => k + 1);
           setStatus("ready");
-        } else if (!cached) {
+          onArticlesLoaded?.(articles);
+        } else {
           setStatus("empty");
+          onArticlesLoaded?.([]);
         }
         refreshTimer = setTimeout(() => { if (alive) load(); }, 120000);
         return;
       }
 
       if (hasText) {
-        // Prefer the backend's generated_at (shared/synced across every
-        // user looking at this same view) -- only fall back to local time
-        // if the response is missing it for some reason.
+        // Prefer the backend's generated_at (shared/synced across every user
+        // looking at this same view) -- only fall back to local time if the
+        // response is missing it for some reason.
         const generatedAtMs = res.generated_at ? new Date(res.generated_at).getTime() : Date.now();
+        const articles: PinnedArticle[] = Array.isArray(res.articles) ? res.articles : [];
         setShouldAnimate(decideAnimate(res.summary, res.conclusion || ""));
         setSummary(res.summary);
         setConclusion(res.conclusion || "");
-        setCache(key, res.summary, res.conclusion || "", generatedAtMs);
+        setCache(key, res.summary, res.conclusion || "", articles, generatedAtMs);
+        setSavedAt(generatedAtMs);
         setAnimKey((k) => k + 1);
         setStatus("ready");
+        onArticlesLoaded?.(articles);
         scheduleAutoRefresh(generatedAtMs);
-      } else if (!cached) {
+      } else {
         setStatus("empty");
+        onArticlesLoaded?.([]);
       }
     }
 
@@ -460,11 +462,30 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
     return () => { alive = false; if (refreshTimer) clearTimeout(refreshTimer); };
   }, [country, category, mode, headlines.join("|")]);
 
+  // Live "refreshes in X min" countdown — ticks every 60s, resets when savedAt changes.
+  // (Purely cosmetic label now — the actual refetch is handled by the effect above.)
+  useEffect(() => {
+    setRefreshLabel(formatRefreshLabel(savedAt));
+    if (savedAt == null) return;
+    const interval = setInterval(() => {
+      setRefreshLabel(formatRefreshLabel(savedAt));
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [savedAt]);
+
+  const mergedText = summary + (conclusion ? " " + conclusion : "");
+  const showFooter = status === "ready" && animationComplete;
+
   return (
     <div className="rounded-xl border border-primary/40 bg-surface-1 p-4 text-foreground glow-primary">
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-primary">
-        <Sparkles className="h-3 w-3" />
-        AI Briefing
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-primary">
+          <Sparkles className="h-3 w-3" />
+          AI Briefing
+        </div>
+        {refreshLabel && status === "ready" && (
+          <span className="text-[10px] text-muted-foreground/60">{refreshLabel}</span>
+        )}
       </div>
 
       <p className="mt-2 text-sm leading-relaxed text-foreground">
@@ -482,21 +503,18 @@ export function AISummaryCard({ headlines, country, category, mode }: Props) {
         </p>
       )}
       {status === "ready" && (
-        <AnimatedText
-          key={animKey}
-          summary={summary}
-          conclusion={conclusion}
-          animStyle={animStyle}
-          shouldAnimate={shouldAnimate}
-          animKey={animKey}
-        />
-      )}
-
-      {isGuest && (
-        <button type="button" onClick={() => { window.location.href = "/auth"; }}
-          className="mt-3 text-xs underline text-muted-foreground hover:text-foreground">
-          Sign in for a personalized briefing
-        </button>
+        <div className="mt-2 space-y-3">
+          <AnimatedText
+            key={animKey}
+            text={mergedText}
+            animStyle={animStyle}
+            shouldAnimate={shouldAnimate}
+            onComplete={() => setAnimationComplete(true)}
+          />
+          {showFooter && (
+            <p className="text-xs italic text-muted-foreground/70">{FOOTER_LINE}</p>
+          )}
+        </div>
       )}
     </div>
   );
