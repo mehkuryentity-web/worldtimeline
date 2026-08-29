@@ -4,17 +4,12 @@ import { CATEGORIES, type Category } from "@/lib/mock-news";
 interface Props {
   value: Category;
   onChange: (c: Category) => void;
-  // How far down to shift the pinned bar, in px -- used to stack this bar
-  // just below FilterBar's own pinned copy (country/time selectors) when
-  // that one is also pinned and visible, instead of overlapping it.
-  // Defaults to 0 (sits directly under the TopBar) for any other usage.
-  topOffset?: number;
 }
 
 // Height of the sticky TopBar (px) — bar pins just below it when floating
 const TOPBAR_HEIGHT = 57;
 
-export function CategoryTabs({ value, onChange, topOffset = 0 }: Props) {
+export function CategoryTabs({ value, onChange }: Props) {
   // Refs
   const sentinelRef = useRef<HTMLDivElement>(null); // sits just above the bar in the DOM flow
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -125,7 +120,7 @@ export function CategoryTabs({ value, onChange, topOffset = 0 }: Props) {
         <div
           className="fixed left-0 right-0 z-20 border-b border-border bg-background/95 backdrop-blur transition-all duration-200"
           style={{
-            top: TOPBAR_HEIGHT + topOffset,
+            top: TOPBAR_HEIGHT,
             transform: showPinned ? "translateY(0)" : "translateY(-110%)",
             opacity: showPinned ? 1 : 0,
             pointerEvents: showPinned ? "auto" : "none",
