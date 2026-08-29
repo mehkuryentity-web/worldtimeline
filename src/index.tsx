@@ -5,8 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
 import { AISummaryCard } from "@/components/AISummaryCard";
-import { CategoryTabs } from "@/components/CategoryTabs";
-import { FilterBar } from "@/components/FilterBar";
+import { StickyFilters } from "@/components/StickyFilters";
 import { NewsCard } from "@/components/NewsCard";
 import { VideoCard } from "@/components/VideoCard";
 import { Ticker } from "@/components/Ticker";
@@ -77,11 +76,6 @@ function Home() {
     hours: state.customRangeHours ?? "",
     minutes: state.customRangeMinutes ?? "",
   });
-
-  // Height of FilterBar's pinned bar while it's actually showing on screen
-  // (0 otherwise) -- passed to CategoryTabs so its own pinned copy stacks
-  // just below FilterBar's instead of overlapping it.
-  const [filterBarPinnedHeight, setFilterBarPinnedHeight] = useState(0);
 
   const touchStartX = useRef<number | null>(null);
 
@@ -481,20 +475,20 @@ function Home() {
           mode={mode}
         />
 
-        <FilterBar
+        {/* Country selector, time-window selector, and category pills are
+            all pinned/hidden together as one sticky unit -- see
+            StickyFilters.tsx. Replaces the old separate inline
+            country/time row + standalone CategoryTabs (which only pinned
+            itself). */}
+        <StickyFilters
           country={country}
           onCountryChange={setCountry}
           mode={mode}
           onModeChange={setMode}
           customRange={customRange}
           onCustomRangeChange={setCustomRange}
-          onPinnedHeightChange={setFilterBarPinnedHeight}
-        />
-
-        <CategoryTabs
-          value={category}
-          onChange={setCategory}
-          topOffset={filterBarPinnedHeight}
+          category={category}
+          onCategoryChange={setCategory}
         />
 
         <h2 className="text-[10px] uppercase text-muted-foreground">
