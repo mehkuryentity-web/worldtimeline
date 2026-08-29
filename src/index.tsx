@@ -6,7 +6,7 @@ import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
 import { AISummaryCard } from "@/components/AISummaryCard";
 import { CategoryTabs } from "@/components/CategoryTabs";
-import { CountrySelector } from "@/components/CountrySelector";
+import { FilterBar } from "@/components/FilterBar";
 import { NewsCard } from "@/components/NewsCard";
 import { VideoCard } from "@/components/VideoCard";
 import { Ticker } from "@/components/Ticker";
@@ -22,7 +22,6 @@ import {
 
 import { findCountry } from "@/lib/countries";
 import { useAppState } from "@/hooks/use-app-state";
-import { Timer } from "lucide-react";
 
 import { getNews } from "@/lib/news";
 import { getVideos, formatViewCount, type VideoListing } from "@/lib/videos";
@@ -78,6 +77,11 @@ function Home() {
     hours: state.customRangeHours ?? "",
     minutes: state.customRangeMinutes ?? "",
   });
+
+  // Height of FilterBar's pinned bar while it's actually showing on screen
+  // (0 otherwise) -- passed to CategoryTabs so its own pinned copy stacks
+  // just below FilterBar's instead of overlapping it.
+  const [filterBarPinnedHeight, setFilterBarPinnedHeight] = useState(0);
 
   const touchStartX = useRef<number | null>(null);
 
@@ -463,12 +467,6 @@ function Home() {
         })
       : items.slice(0, 6).map((i) => i.title);
 
-  const isCustomValid =
-    customRange.hours.trim() !== "" ||
-    customRange.minutes.trim() !== "";
-
-  const showCustom = mode === "custom";
-
   return (
     <div className="min-h-screen bg-background pb-28">
       <TopBar />
@@ -483,60 +481,21 @@ function Home() {
           mode={mode}
         />
 
-        <div className="flex items-center justify-between gap-2">
-          <CountrySelector value={country} onChange={setCountry} />
+        <FilterBar
+          country={country}
+          onCountryChange={setCountry}
+          mode={mode}
+          onModeChange={setMode}
+          customRange={customRange}
+          onCustomRangeChange={setCustomRange}
+          onPinnedHeightChange={setFilterBarPinnedHeight}
+        />
 
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <Timer className="h-3 w-3" />
-
-              <select
-                value={mode}
-                onChange={(e) => setMode(e.target.value as Mode)}
-                className="text-xs border rounded px-2 py-1"
-              >
-                <option value="all">All News</option>
-                <option value="5m">5 min</option>
-                <option value="10m">10 min</option>
-                <option value="30m">30 min</option>
-                <option value="1h">1 hour</option>
-                <option value="24h">24 hours</option>
-                <option value="custom">Custom</option>
-              </select>
-            </div>
-
-            {showCustom && (
-              <div className="flex gap-2 items-center">
-                <input
-                  className="border px-2 py-1 text-xs w-20"
-                  placeholder="hrs"
-                  value={customRange.hours}
-                  onChange={(e) =>
-                    setCustomRange((p) => ({
-                      ...p,
-                      hours: e.target.value,
-                    }))
-                  }
-                />
-
-                <input
-                  className="border px-2 py-1 text-xs w-20"
-                  placeholder="min"
-                  value={customRange.minutes}
-                  onChange={(e) =>
-                    setCustomRange((p) => ({
-                      ...p,
-                      minutes: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-            )}
-          </div>
-        </div>
-
-
-        <CategoryTabs value={category} onChange={setCategory} />
+        <CategoryTabs
+          value={category}
+          onChange={setCategory}
+          topOffset={filterBarPinnedHeight}
+        />
 
         <h2 className="text-[10px] uppercase text-muted-foreground">
           {countryMeta.flag} {countryMeta.name} · {category}
