@@ -47,7 +47,57 @@ export function StickyFilters({
   // Refs
   const sentinelRef = useRef<HTMLDivElement>(null); // marks original position in the flow
   const scrollRef = useRef<HTMLDivElement>(null); // pinned pill row, for scroll-active-into-view
+  const inFlowScrollRef = useRef<HTMLDivElement>(null); // in-flow pill row (separate DOM node)
   const activeRef = useRef<HTMLButtonElement | null>(null);
+
+  // Click-and-drag horizontal scrolling for the category pill row --
+  // native touch scroll already works fine on mobile, but desktop has no
+  // touch surface, so without this the pills are only reachable via a
+  // trackpad's horizontal swipe (not obvious, and not available at all
+  // with a plain mouse). Bound separately to the in-flow and pinned pill
+  // rows since they're two different DOM nodes.
+  const useDragScroll = (ref: React.RefObject<HTMLDivElement>) => {
+    const isDown = useRef(false);
+    const startX = useRef(0);
+    const startScrollLeft = useRef(0);
+    const moved = useRef(false); // did the mouse actually travel? (vs. a plain click)
+
+    const onMouseDown = (e: React.MouseEvent) => {
+      const el = ref.current;
+      if (!el) return;
+      isDown.current = true;
+      moved.current = false;
+      startX.current = e.pageX;
+      startScrollLeft.current = el.scrollLeft;
+    };
+
+    const onMouseMove = (e: React.MouseEvent) => {
+      if (!isDown.current) return;
+      const el = ref.current;
+      if (!el) return;
+      const dx = e.pageX - startX.current;
+      if (Math.abs(dx) > 3) moved.current = true;
+      el.scrollLeft = startScrollLeft.current - dx;
+    };
+
+    const endDrag = () => {
+      isDown.current = false;
+    };
+
+    // Swallow the click that follows a drag so releasing the mouse over a
+    // pill doesn't also select it -- only a real (non-dragged) click does.
+    const onClickCapture = (e: React.MouseEvent) => {
+      if (moved.current) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    return { onMouseDown, onMouseMove, onMouseUp: endDrag, onMouseLeave: endDrag, onClickCapture };
+  };
+
+  const inFlowDrag = useDragScroll(inFlowScrollRef);
+  const pinnedDrag = useDragScroll(scrollRef);
 
   // Whether the bar has scrolled past the top (should pin)
   const [pinned, setPinned] = useState(false);
@@ -206,8 +256,14 @@ export function StickyFilters({
       >
         {filterRow}
         <div
-          className="no-scrollbar overflow-x-auto"
+          ref={inFlowScrollRef}
+          className="no-scrollbar overflow-x-auto cursor-grab select-none active:cursor-grabbing"
           style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}
+          onMouseDown={inFlowDrag.onMouseDown}
+          onMouseMove={inFlowDrag.onMouseMove}
+          onMouseUp={inFlowDrag.onMouseUp}
+          onMouseLeave={inFlowDrag.onMouseLeave}
+          onClickCapture={inFlowDrag.onClickCapture}
         >
           {pills}
         </div>
@@ -228,8 +284,13 @@ export function StickyFilters({
             {filterRow}
             <div
               ref={scrollRef}
-              className="no-scrollbar overflow-x-auto"
+              className="no-scrollbar overflow-x-auto cursor-grab select-none active:cursor-grabbing"
               style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}
+              onMouseDown={pinnedDrag.onMouseDown}
+              onMouseMove={pinnedDrag.onMouseMove}
+              onMouseUp={pinnedDrag.onMouseUp}
+              onMouseLeave={pinnedDrag.onMouseLeave}
+              onClickCapture={pinnedDrag.onClickCapture}
             >
               {pills}
             </div>
