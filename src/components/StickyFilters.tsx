@@ -142,11 +142,17 @@ export function StickyFilters({
     return () => window.removeEventListener("scroll", onScroll);
   }, [onScroll]);
 
-  // Scroll active pill into view when selection changes
+  // Scroll active pill into view when selection changes. Walk up from the
+  // active button to find its actual scroll container instead of assuming
+  // it's the pinned copy (scrollRef) -- when the bar isn't pinned yet, the
+  // pinned copy isn't even mounted (scrollRef.current is null), so that
+  // assumption silently did nothing for the in-flow row.
   useEffect(() => {
     const el = activeRef.current;
-    const container = scrollRef.current;
-    if (!el || !container) return;
+    if (!el) return;
+    // el -> "flex gap-2" pills wrapper -> the scrollable row div
+    const container = el.parentElement?.parentElement as HTMLDivElement | null;
+    if (!container) return;
 
     const elLeft = el.offsetLeft;
     const elRight = elLeft + el.offsetWidth;
