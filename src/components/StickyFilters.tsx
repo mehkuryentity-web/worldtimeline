@@ -65,6 +65,13 @@ export function StickyFilters({
     const onMouseDown = (e: React.MouseEvent) => {
       const el = ref.current;
       if (!el) return;
+      // Prevent the browser's default mouse-click focus behavior on the
+      // pill button underneath -- a newly-focused element near a `fixed`
+      // TopBar/pinned bar gets auto-scrolled "into view" by the browser,
+      // which doesn't know the fixed bars overlay the content, so it nudges
+      // the whole page down and reveals more of the feed. Skipping focus
+      // on mouse click sidesteps that; keyboard/tab focus is unaffected.
+      e.preventDefault();
       isDown.current = true;
       moved.current = false;
       startX.current = e.pageX;
@@ -147,6 +154,14 @@ export function StickyFilters({
   // it's the pinned copy (scrollRef) -- when the bar isn't pinned yet, the
   // pinned copy isn't even mounted (scrollRef.current is null), so that
   // assumption silently did nothing for the in-flow row.
+  //
+  // Position math uses getBoundingClientRect() rather than el.offsetLeft --
+  // offsetLeft is relative to the nearest *positioned* ancestor, which
+  // once everything sits inside the `fixed` pinned bar is NOT necessarily
+  // the scroll container itself, so it under/over-counts depending on
+  // which direction you're scrolling (this was why "scroll right" pills
+  // worked but "scroll left" ones didn't -- the numbers were only right
+  // by coincidence in one direction).
   useEffect(() => {
     const el = activeRef.current;
     if (!el) return;
@@ -154,15 +169,18 @@ export function StickyFilters({
     const container = el.parentElement?.parentElement as HTMLDivElement | null;
     if (!container) return;
 
-    const elLeft = el.offsetLeft;
-    const elRight = elLeft + el.offsetWidth;
+    const elRect = el.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+
+    const elLeft = elRect.left - containerRect.left + container.scrollLeft;
+    const elRight = elLeft + elRect.width;
     const cLeft = container.scrollLeft;
-    const cRight = cLeft + container.offsetWidth;
+    const cRight = cLeft + container.clientWidth;
 
     if (elLeft < cLeft + 16) {
       container.scrollTo({ left: elLeft - 16, behavior: "smooth" });
     } else if (elRight > cRight - 16) {
-      container.scrollTo({ left: elRight - container.offsetWidth + 16, behavior: "smooth" });
+      container.scrollTo({ left: elRight - container.clientWidth + 16, behavior: "smooth" });
     }
   }, [category]);
 
